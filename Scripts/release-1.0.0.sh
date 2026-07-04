@@ -5,7 +5,7 @@ VERSION="1.0.0"
 TAG="v$VERSION"
 REPO="weizhiyan/Mac-dynamic-island"
 DMG="Release/Mac-Dynamic-Island-$VERSION.dmg"
-NOTES="Release/RELEASE_NOTES_v$VERSION.md"
+NOTES="Docs/releases/v$VERSION.md"
 
 if [[ ! -f "$DMG" ]]; then
   echo "Missing $DMG. Run: NO_OPEN=1 ./LaunchDynamicIsland.command"
