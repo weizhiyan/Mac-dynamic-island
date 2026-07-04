@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+Build/
+Release/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+.claude/
+.figma/
+.trae/
