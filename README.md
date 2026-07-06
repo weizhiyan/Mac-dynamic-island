@@ -1,24 +1,39 @@
-# Mac Dynamic Island
+# 灵动岛
 
-Mac Dynamic Island is a lightweight macOS notch utility that turns the top notch area into a quick-launch island for your favorite apps.
+灵动岛是一个轻量级 macOS 刘海快捷启动工具。它会在屏幕顶部刘海区域展开黑色的动态卡片，让常用应用可以从顶部快速打开。
 
-## Features
+## 功能
 
-- Fluid black dynamic-island style UI around the Mac notch
-- Hover-triggered quick launcher
-- Custom shortcut apps with drag-to-reorder
-- Adjustable icon size, grid count, spacing, trigger zone, and animation timing
-- Menu bar controls and settings panel
+- 黑色灵动岛界面，与 MacBook 刘海自然融合
+- 鼠标滑到顶部触发快捷入口，避免占用桌面空间
+- 自定义快捷应用，支持添加、删除和拖拽排序
+- 可调整图标大小、展示数量、间距、触发区域和动画速度
+- 支持显示触发区域预览，方便校准顶部悬停范围
+- 设置里可开启开机自启动
+- 启动后隐藏 Dock 图标，只保留菜单栏入口
 
-## Install
+## 安装
 
-Download the latest release package, open the `.dmg`, and drag `DynamicIsland.app` into Applications.
+下载最新的 `Mac-Dynamic-Island-1.0.0.dmg` 后打开：
 
-## Build From Source
+- 双击 `安装灵动岛.command` 会自动覆盖安装到 `/Applications/灵动岛.app`
+- 也可以手动把 `灵动岛.app` 拖到 Applications
+
+安装脚本会清理旧版 `DynamicIsland.app` 和重复的 `灵动岛.app`，避免同一台 Mac 上出现多个副本。
+
+## 从源码运行
 
 ```bash
 swift build
 ./LaunchDynamicIsland.command
 ```
 
-Requires macOS 14 or later.
+需要 macOS 14 或更高版本。
+
+## 项目结构
+
+- `Sources/DynamicIsland`：应用源码
+- `Sources/DynamicIsland/Resources`：应用图标、状态栏图标和资源
+- `Scripts/build-dmg.command`：构建可安装 DMG
+- `Scripts/install-local.command`：本地覆盖安装脚本
+- `Docs/releases`：发布说明

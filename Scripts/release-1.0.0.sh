@@ -8,8 +8,8 @@ DMG="Release/Mac-Dynamic-Island-$VERSION.dmg"
 NOTES="Docs/releases/v$VERSION.md"
 
 if [[ ! -f "$DMG" ]]; then
-  echo "Missing $DMG. Run: NO_OPEN=1 ./LaunchDynamicIsland.command"
-  exit 1
+  echo "Missing $DMG. Building it now..."
+  ./Scripts/build-dmg.command
 fi
 
 git push -u origin main

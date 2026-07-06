@@ -63,6 +63,12 @@ struct SettingsView: View {
                 SliderSetting(title: "顶部内边距", value: $settings.contentTopPadding.doubleValue, range: 10...46, step: 1, suffix: "px")
             }
 
+            SettingsGroup("系统") {
+                Toggle(isOn: $settings.launchAtLoginEnabled) {
+                    Label("开机自启动", systemImage: "power")
+                }
+            }
+
             SettingsGroup("维护") {
                 HStack {
                     Label("恢复所有参数到默认值", systemImage: "arrow.counterclockwise")

@@ -3,8 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT_DIR/Build"
-APP_NAME="DynamicIsland"
-APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+APP_PRODUCT="DynamicIsland"
+APP_DISPLAY_NAME="灵动岛"
+APP_BUNDLE="$BUILD_DIR/$APP_DISPLAY_NAME.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -12,20 +13,20 @@ PLIST_FILE="$CONTENTS_DIR/Info.plist"
 
 cd "$ROOT_DIR"
 
-swift build -c release --product "$APP_NAME"
+swift build -c release --product "$APP_PRODUCT"
 
 BIN_DIR="$(swift build -c release --show-bin-path)"
-BINARY_PATH="$BIN_DIR/$APP_NAME"
+BINARY_PATH="$BIN_DIR/$APP_PRODUCT"
 if [[ -z "${BINARY_PATH:-}" ]]; then
   echo "Could not find built binary."
   exit 1
 fi
-RESOURCE_BUNDLE="$BIN_DIR/${APP_NAME}_${APP_NAME}.bundle"
+RESOURCE_BUNDLE="$BIN_DIR/${APP_PRODUCT}_${APP_PRODUCT}.bundle"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-cp "$BINARY_PATH" "$MACOS_DIR/$APP_NAME"
-chmod +x "$MACOS_DIR/$APP_NAME"
+cp "$BINARY_PATH" "$MACOS_DIR/$APP_PRODUCT"
+chmod +x "$MACOS_DIR/$APP_PRODUCT"
 
 if [[ -d "$RESOURCE_BUNDLE" ]]; then
   cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/"
@@ -43,7 +44,9 @@ cat > "$PLIST_FILE" <<EOF
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>$APP_NAME</string>
+  <string>$APP_PRODUCT</string>
+  <key>CFBundleDisplayName</key>
+  <string>$APP_DISPLAY_NAME</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
@@ -51,13 +54,15 @@ cat > "$PLIST_FILE" <<EOF
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>$APP_NAME</string>
+  <string>$APP_DISPLAY_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
   <key>LSUIElement</key>
   <true/>
 </dict>

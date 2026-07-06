@@ -192,6 +192,17 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(mode.rawValue, forKey: Key.mode) }
     }
 
+    // MARK: - 系统
+    @Published var launchAtLoginEnabled: Bool {
+        didSet {
+            let actualValue = LoginItemManager.setEnabled(launchAtLoginEnabled)
+            defaults.set(actualValue, forKey: Key.launchAtLoginEnabled)
+            if actualValue != launchAtLoginEnabled {
+                launchAtLoginEnabled = actualValue
+            }
+        }
+    }
+
     // MARK: - Key 定义
     private enum Key {
         // 应用网格
@@ -231,6 +242,8 @@ final class SettingsStore: ObservableObject {
         static let bulgeCornerRadius = "bulgeCornerRadius"
         // 模式
         static let mode = "islandMode"
+        // 系统
+        static let launchAtLoginEnabled = "launchAtLoginEnabled"
         // 版本号 — 每次修改默认值时 +1，旧缓存会自动清空
         static let settingsVersion = "settingsVersion"
     }
@@ -253,7 +266,7 @@ final class SettingsStore: ObservableObject {
                         Key.contentFadeInDuration, Key.contentFadeOutDuration,
                         Key.expandTimingCurve, Key.collapseTimingCurve,
                         Key.compactCornerRadius, Key.expandedCornerRadius, Key.bulgeCornerRadius,
-                        Key.mode] {
+                        Key.mode, Key.launchAtLoginEnabled] {
                 d.removeObject(forKey: key)
             }
             d.set(Self.currentVersion, forKey: Key.settingsVersion)
@@ -297,6 +310,8 @@ final class SettingsStore: ObservableObject {
         bulgeCornerRadius = d.object(forKey: Key.bulgeCornerRadius) as? CGFloat ?? 23
         // 模式
         mode = IslandMode(rawValue: d.string(forKey: Key.mode) ?? "") ?? .systemNotch
+        // 系统
+        launchAtLoginEnabled = LoginItemManager.isEnabled
     }
 
     /// 恢复所有参数到默认值（用于设置面板的「恢复默认」按钮）
@@ -332,5 +347,6 @@ final class SettingsStore: ObservableObject {
         expandedCornerRadius = 16
         bulgeCornerRadius = 23
         mode = .systemNotch
+        launchAtLoginEnabled = false
     }
 }
