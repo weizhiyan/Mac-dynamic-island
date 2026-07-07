@@ -2,14 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="1.0.0"
+VERSION="${VERSION:-1.0.1}"
 APP_NAME="灵动岛.app"
 DMG_NAME="Mac-Dynamic-Island-$VERSION.dmg"
 VOLUME_NAME="灵动岛 $VERSION"
 
 cd "$ROOT_DIR"
 
-NO_OPEN=1 "$ROOT_DIR/LaunchDynamicIsland.command"
+APP_VERSION="$VERSION" APP_BUILD="${APP_BUILD:-2}" NO_OPEN=1 "$ROOT_DIR/LaunchDynamicIsland.command"
 
 rm -rf "$ROOT_DIR/Release/dmg-root" "$ROOT_DIR/Release/$DMG_NAME"
 mkdir -p "$ROOT_DIR/Release/dmg-root"

@@ -69,6 +69,16 @@ struct SettingsView: View {
                 }
             }
 
+            SettingsGroup("更新") {
+                HStack {
+                    Label("当前版本 \(appVersion)", systemImage: "arrow.triangle.2.circlepath")
+                    Spacer()
+                    Button("检查更新") {
+                        AppDelegate.shared?.checkForUpdates()
+                    }
+                }
+            }
+
             SettingsGroup("维护") {
                 HStack {
                     Label("恢复所有参数到默认值", systemImage: "arrow.counterclockwise")
@@ -86,6 +96,17 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        if let version, let build, !build.isEmpty {
+            return "\(version) (\(build))"
+        }
+
+        return version ?? "未知"
     }
 
     private var appManagementSection: some View {

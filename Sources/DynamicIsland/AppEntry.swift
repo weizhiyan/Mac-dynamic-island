@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Sparkle
 
 @main
 struct DynamicIslandApp: App {
@@ -21,12 +22,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var detectorWindow: HoverDetectorWindowController?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private lazy var updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
     private var isIslandEnabled = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
         print("DynamicIsland: didFinishLaunching")
         NSApp.setActivationPolicy(.accessory)
+        _ = updaterController
 
         let island = IslandWindowController()
         islandWindow = island
@@ -81,6 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "显示灵动岛", action: #selector(showIsland), keyEquivalent: "s")
         menu.addItem(withTitle: "隐藏灵动岛", action: #selector(hideIsland), keyEquivalent: "h")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "检查更新...", action: #selector(checkForUpdates), keyEquivalent: "u")
+        menu.addItem(.separator())
         menu.addItem(withTitle: "设置...", action: #selector(openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "退出", action: #selector(quit), keyEquivalent: "q")
@@ -98,6 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         islandWindow?.hideIslandImmediately()
     }
     func showTriggerAreaPreview() { detectorWindow?.showActivationZonePreview() }
+
+    @objc func checkForUpdates() {
+        updaterController.checkForUpdates(nil)
+    }
 
     @objc private func openSettings() {
         if settingsWindow == nil {

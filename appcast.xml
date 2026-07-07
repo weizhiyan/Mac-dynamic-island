@@ -1,0 +1,30 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>灵动岛</title>
+        <item>
+            <title>1.0.1</title>
+            <pubDate>Tue, 07 Jul 2026 22:42:24 +0800</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.1
+
+这个版本加入了应用内更新能力，后续版本可以通过菜单栏或设置页直接检查更新。
+
+## 新增
+
+- 接入 Sparkle 更新框架
+- 菜单栏增加“检查更新...”
+- 设置页增加当前版本展示和“检查更新”按钮
+- 打包流程自动嵌入 Sparkle.framework 和更新源配置
+
+## 说明
+
+1.0.0 本身没有内置更新器，所以已经安装 1.0.0 的用户需要手动安装一次 1.0.1。安装 1.0.1 后，后续 1.0.2 及更高版本就可以走应用内更新。
+]]></description>
+            <enclosure url="https://raw.githubusercontent.com/weizhiyan/Mac-dynamic-island/main/Downloads/Mac-Dynamic-Island-1.0.1.dmg" length="1770137" type="application/octet-stream" sparkle:edSignature="nVrUBG51eQ6FiRNt3TKcWAjEd+VbqUhOPjXL4A8Wh3vF1YJaM8dBNGcnWXacBc3PqCvWZ9EaHxU9troDVOb2Dg=="/>
+        </item>
+    </channel>
+</rss>
