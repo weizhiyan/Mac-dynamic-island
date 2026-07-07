@@ -18,7 +18,10 @@
 
 ## 安装
 
-下载最新的 `Mac-Dynamic-Island-1.0.1.dmg` 后打开：
+下载最新的安装包：
+
+- `Downloads/Mac-Dynamic-Island-1.0.1.pkg`：双击安装到 `/Applications`
+- `Downloads/Mac-Dynamic-Island-1.0.1.dmg`：备用安装镜像，也用于应用内自动更新
 
 - 双击 `安装灵动岛.command` 会自动覆盖安装到 `/Applications/灵动岛.app`
 - 也可以手动把 `灵动岛.app` 拖到 Applications
@@ -39,6 +42,7 @@ swift build
 - `Sources/DynamicIsland`：应用源码
 - `Sources/DynamicIsland/Resources`：应用图标、状态栏图标和资源
 - `Scripts/build-dmg.command`：构建可安装 DMG
+- `Scripts/build-pkg.command`：构建 macOS `.pkg` 安装包
 - `Scripts/install-local.command`：本地覆盖安装脚本
 - `Scripts/release.sh`：生成安装包、更新 `appcast.xml`，并通过 git 推送到 GitHub
 - `Scripts/generate-appcast.command`：生成 Sparkle 更新源，需要本机 Keychain 里有对应私钥，或设置 `SPARKLE_ED_PRIVATE_KEY`
