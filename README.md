@@ -2,6 +2,9 @@
 
 灵动岛是一个轻量级 macOS 刘海快捷启动工具。它会在屏幕顶部刘海区域展开黑色的动态卡片，让常用应用可以从顶部快速打开。
 
+<img width="829" height="257" alt="202607188223739" src="https://github.com/user-attachments/assets/6ebf3349-53f7-4e46-86f5-e0df9e975cbc" />
+
+
 ## 功能
 
 - 黑色灵动岛界面，与 MacBook 刘海自然融合
