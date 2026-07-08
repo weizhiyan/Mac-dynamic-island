@@ -10,6 +10,9 @@ APP_BUILD="${APP_BUILD:-2}"
 APPCAST_URL="${APPCAST_URL:-https://raw.githubusercontent.com/weizhiyan/Mac-dynamic-island/main/appcast.xml}"
 SPARKLE_PUBLIC_KEY="28WnLNAVZfPjPPkIQIZlni3sSjuwE8kvn3nPAT2X/W8="
 APP_BUNDLE="$BUILD_DIR/$APP_DISPLAY_NAME.app"
+BUILD_ARCH="${BUILD_ARCH:-}"
+SIGNING_ROOT="/tmp/lingdongdao-signing"
+SIGNED_APP_BUNDLE="$SIGNING_ROOT/$APP_DISPLAY_NAME.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -18,9 +21,14 @@ PLIST_FILE="$CONTENTS_DIR/Info.plist"
 
 cd "$ROOT_DIR"
 
-swift build -c release --product "$APP_PRODUCT"
+BUILD_ARCH_FLAGS=()
+if [[ -n "$BUILD_ARCH" ]]; then
+  BUILD_ARCH_FLAGS=(--arch "$BUILD_ARCH")
+fi
 
-BIN_DIR="$(swift build -c release --show-bin-path)"
+swift build -c release --product "$APP_PRODUCT" "${BUILD_ARCH_FLAGS[@]}"
+
+BIN_DIR="$(swift build -c release --show-bin-path "${BUILD_ARCH_FLAGS[@]}")"
 BINARY_PATH="$BIN_DIR/$APP_PRODUCT"
 if [[ -z "${BINARY_PATH:-}" ]]; then
   echo "Could not find built binary."
@@ -91,8 +99,24 @@ cat > "$PLIST_FILE" <<EOF
 EOF
 
 touch "$APP_BUNDLE"
-find "$APP_BUNDLE" -exec xattr -c {} \; 2>/dev/null || true
-codesign --force --sign - --deep "$APP_BUNDLE" >/dev/null
+find "$APP_BUNDLE" \( -name ".DS_Store" -o -name "._*" \) -delete
+xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+xattr -rd com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+xattr -rd com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
+xattr -rd 'com.apple.fileprovider.fpfs#P' "$APP_BUNDLE" 2>/dev/null || true
+find "$APP_BUNDLE" -exec xattr -d com.apple.FinderInfo {} + 2>/dev/null || true
+find "$APP_BUNDLE" -exec xattr -d com.apple.ResourceFork {} + 2>/dev/null || true
+find "$APP_BUNDLE" -exec xattr -d 'com.apple.fileprovider.fpfs#P' {} + 2>/dev/null || true
+find "$APP_BUNDLE" -xattrname com.apple.FinderInfo -exec xattr -d com.apple.FinderInfo {} \; 2>/dev/null || true
+find "$APP_BUNDLE" -xattrname com.apple.ResourceFork -exec xattr -d com.apple.ResourceFork {} \; 2>/dev/null || true
+find "$APP_BUNDLE" -xattrname 'com.apple.fileprovider.fpfs#P' -exec xattr -d 'com.apple.fileprovider.fpfs#P' {} \; 2>/dev/null || true
+
+rm -rf "$SIGNING_ROOT"
+mkdir -p "$SIGNING_ROOT"
+ditto --norsrc --noextattr --noacl --noqtn "$APP_BUNDLE" "$SIGNED_APP_BUNDLE"
+codesign --force --sign - --deep "$SIGNED_APP_BUNDLE" >/dev/null
+rm -rf "$APP_BUNDLE"
+ditto --norsrc --noextattr --noacl --noqtn "$SIGNED_APP_BUNDLE" "$APP_BUNDLE"
 if [[ "${NO_OPEN:-0}" != "1" ]]; then
   open -n "$APP_BUNDLE"
 fi

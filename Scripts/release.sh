@@ -4,21 +4,21 @@ set -euo pipefail
 VERSION="${VERSION:-1.0.1}"
 TAG="v$VERSION"
 REPO="${REPO:-weizhiyan/Mac-dynamic-island}"
-DMG="Release/Mac-Dynamic-Island-$VERSION.dmg"
 PKG="Release/Mac-Dynamic-Island-$VERSION.pkg"
-PUBLIC_DMG="Downloads/Mac-Dynamic-Island-$VERSION.dmg"
+INTEL_PKG="Release/Mac-Dynamic-Island-$VERSION-intel.pkg"
 PUBLIC_PKG="Downloads/Mac-Dynamic-Island-$VERSION.pkg"
+PUBLIC_INTEL_PKG="Downloads/Mac-Dynamic-Island-$VERSION-intel.pkg"
 NOTES="Docs/releases/v$VERSION.md"
 DOWNLOAD_PREFIX="https://raw.githubusercontent.com/$REPO/main/Downloads/"
-
-if [[ ! -f "$DMG" ]]; then
-  echo "Missing $DMG. Building it now..."
-  VERSION="$VERSION" ./Scripts/build-dmg.command
-fi
 
 if [[ ! -f "$PKG" ]]; then
   echo "Missing $PKG. Building it now..."
   VERSION="$VERSION" ./Scripts/build-pkg.command
+fi
+
+if [[ ! -f "$INTEL_PKG" ]]; then
+  echo "Missing $INTEL_PKG. Building it now..."
+  VERSION="$VERSION" BUILD_ARCH=x86_64 ./Scripts/build-pkg.command
 fi
 
 if [[ ! -f "$NOTES" ]]; then
@@ -27,14 +27,14 @@ if [[ ! -f "$NOTES" ]]; then
 fi
 
 mkdir -p Downloads
-ditto --norsrc --noextattr --noacl --noqtn "$DMG" "$PUBLIC_DMG"
+rm -f Downloads/Mac-Dynamic-Island-"$VERSION"*.dmg
 ditto --norsrc --noextattr --noacl --noqtn "$PKG" "$PUBLIC_PKG"
+ditto --norsrc --noextattr --noacl --noqtn "$INTEL_PKG" "$PUBLIC_INTEL_PKG"
 
-DOWNLOAD_PREFIX="$DOWNLOAD_PREFIX" VERSION="$VERSION" REPO="$REPO" ./Scripts/generate-appcast.command
-
-if [[ -n "$(git status --short -- appcast.xml "$PUBLIC_DMG" "$PUBLIC_PKG")" ]]; then
-  git add appcast.xml "$PUBLIC_DMG" "$PUBLIC_PKG"
-  git commit -m "Update appcast for $TAG"
+if [[ -n "$(git status --short -- Downloads)" ]]; then
+  git add -u Downloads
+  git add "$PUBLIC_PKG" "$PUBLIC_INTEL_PKG"
+  git commit -m "Update installers for $TAG"
 fi
 
 if ! git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -45,5 +45,5 @@ git push -u origin main
 git push origin "$TAG"
 
 echo "发布完成："
-echo "$DOWNLOAD_PREFIX$(basename "$PUBLIC_DMG")"
 echo "$DOWNLOAD_PREFIX$(basename "$PUBLIC_PKG")"
+echo "$DOWNLOAD_PREFIX$(basename "$PUBLIC_INTEL_PKG")"
