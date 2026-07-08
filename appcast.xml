@@ -3,8 +3,8 @@
     <channel>
         <title>灵动岛</title>
         <item>
-            <title>1.0.1 Apple Silicon</title>
-            <pubDate>Wed, 08 Jul 2026 12:24:23 +0800</pubDate>
+            <title>1.0.1 M 芯片</title>
+            <pubDate>Wed, 08 Jul 2026 12:34:14 +0800</pubDate>
             <sparkle:version>2</sparkle:version>
             <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
@@ -24,11 +24,11 @@
 
 1.0.0 本身没有内置更新器，所以已经安装 1.0.0 的用户需要手动安装一次 1.0.1。安装 1.0.1 后，后续 1.0.2 及更高版本就可以走应用内更新。
 ]]></description>
-            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.1/Mac-Dynamic-Island-1.0.1-Apple-Silicon.pkg" sparkle:edSignature="weUGWElyQnpZ2lmvzM7goA4iIrGcWxkRwCyXvMCo0WXZUEUYkMcgQ82r8OAyo0WcJVunKUD4qs8Gx3to/YBxBg==" length="1419737" type="application/octet-stream"/>
+            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.1/Mac灵动岛_M芯片_1.0.1.pkg" sparkle:edSignature="weUGWElyQnpZ2lmvzM7goA4iIrGcWxkRwCyXvMCo0WXZUEUYkMcgQ82r8OAyo0WcJVunKUD4qs8Gx3to/YBxBg==" length="1419737" type="application/octet-stream"/>
         </item>
         <item>
-            <title>1.0.1 Intel</title>
-            <pubDate>Wed, 08 Jul 2026 12:24:23 +0800</pubDate>
+            <title>1.0.1 intel</title>
+            <pubDate>Wed, 08 Jul 2026 12:34:14 +0800</pubDate>
             <sparkle:version>2</sparkle:version>
             <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
@@ -48,7 +48,7 @@
 
 1.0.0 本身没有内置更新器，所以已经安装 1.0.0 的用户需要手动安装一次 1.0.1。安装 1.0.1 后，后续 1.0.2 及更高版本就可以走应用内更新。
 ]]></description>
-            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.1/Mac-Dynamic-Island-1.0.1-Intel.pkg" sparkle:edSignature="oh5OStkxHTtcPlf8vz1SreNCnnygOQnRRzt+bXpsZsQi5nOwrhdoYYBc31IeA6VSD9L1QoPKxBZNpx/JjYxWBQ==" length="1425391" type="application/octet-stream"/>
+            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.1/Mac灵动岛_intel_1.0.1.pkg" sparkle:edSignature="oh5OStkxHTtcPlf8vz1SreNCnnygOQnRRzt+bXpsZsQi5nOwrhdoYYBc31IeA6VSD9L1QoPKxBZNpx/JjYxWBQ==" length="1425391" type="application/octet-stream"/>
         </item>
     </channel>
 </rss>

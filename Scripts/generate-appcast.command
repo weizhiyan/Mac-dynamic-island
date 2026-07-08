@@ -6,8 +6,8 @@ VERSION="${VERSION:-1.0.1}"
 REPO="${REPO:-weizhiyan/Mac-dynamic-island}"
 PKG="$ROOT_DIR/Release/Mac-Dynamic-Island-$VERSION.pkg"
 INTEL_PKG="$ROOT_DIR/Release/Mac-Dynamic-Island-$VERSION-intel.pkg"
-APPCAST_PKG_NAME="Mac-Dynamic-Island-$VERSION-Apple-Silicon.pkg"
-APPCAST_INTEL_PKG_NAME="Mac-Dynamic-Island-$VERSION-Intel.pkg"
+APPCAST_PKG_NAME="Mac灵动岛_M芯片_$VERSION.pkg"
+APPCAST_INTEL_PKG_NAME="Mac灵动岛_intel_$VERSION.pkg"
 NOTES="$ROOT_DIR/Docs/releases/v$VERSION.md"
 APPCAST="$ROOT_DIR/appcast.xml"
 DOWNLOAD_PREFIX="${DOWNLOAD_PREFIX:-https://github.com/$REPO/releases/download/v$VERSION/}"
@@ -65,7 +65,7 @@ cat > "$APPCAST" <<EOF
     <channel>
         <title>灵动岛</title>
         <item>
-            <title>$VERSION Apple Silicon</title>
+            <title>$VERSION M 芯片</title>
             <pubDate>$PUB_DATE</pubDate>
             <sparkle:version>$BUILD_VERSION</sparkle:version>
             <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
@@ -76,7 +76,7 @@ cat > "$APPCAST" <<EOF
             <enclosure url="${DOWNLOAD_PREFIX}${APPCAST_PKG_NAME}" $ARM_SIGNATURE_AND_LENGTH type="application/octet-stream"/>
         </item>
         <item>
-            <title>$VERSION Intel</title>
+            <title>$VERSION intel</title>
             <pubDate>$PUB_DATE</pubDate>
             <sparkle:version>$BUILD_VERSION</sparkle:version>
             <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>

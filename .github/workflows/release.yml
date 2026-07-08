@@ -26,5 +26,5 @@ jobs:
           tag_name: "${{ github.ref_name }}"
           body_path: "Docs/releases/${{ github.ref_name }}.md"
           files: |
-            Downloads/Mac-Dynamic-Island-${{ env.RELEASE_VERSION }}-Apple-Silicon.pkg
-            Downloads/Mac-Dynamic-Island-${{ env.RELEASE_VERSION }}-Intel.pkg
+            Downloads/Mac灵动岛_M芯片_${{ env.RELEASE_VERSION }}.pkg
+            Downloads/Mac灵动岛_intel_${{ env.RELEASE_VERSION }}.pkg

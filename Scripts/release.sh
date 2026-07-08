@@ -6,8 +6,8 @@ TAG="v$VERSION"
 REPO="${REPO:-weizhiyan/Mac-dynamic-island}"
 PKG="Release/Mac-Dynamic-Island-$VERSION.pkg"
 INTEL_PKG="Release/Mac-Dynamic-Island-$VERSION-intel.pkg"
-PUBLIC_PKG="Downloads/Mac-Dynamic-Island-$VERSION-Apple-Silicon.pkg"
-PUBLIC_INTEL_PKG="Downloads/Mac-Dynamic-Island-$VERSION-Intel.pkg"
+PUBLIC_PKG="Downloads/Mac灵动岛_M芯片_$VERSION.pkg"
+PUBLIC_INTEL_PKG="Downloads/Mac灵动岛_intel_$VERSION.pkg"
 NOTES="Docs/releases/v$VERSION.md"
 DOWNLOAD_PREFIX="https://raw.githubusercontent.com/$REPO/main/Downloads/"
 
@@ -29,6 +29,7 @@ fi
 mkdir -p Downloads
 rm -f Downloads/Mac-Dynamic-Island-"$VERSION"*.dmg(N)
 rm -f Downloads/Mac-Dynamic-Island-"$VERSION".pkg Downloads/Mac-Dynamic-Island-"$VERSION"-intel.pkg
+rm -f Downloads/Mac-Dynamic-Island-"$VERSION"-Apple-Silicon.pkg Downloads/Mac-Dynamic-Island-"$VERSION"-Intel.pkg
 ditto --norsrc --noextattr --noacl --noqtn "$PKG" "$PUBLIC_PKG"
 ditto --norsrc --noextattr --noacl --noqtn "$INTEL_PKG" "$PUBLIC_INTEL_PKG"
 

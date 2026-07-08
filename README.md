@@ -20,8 +20,8 @@
 
 下载最新的安装包：
 
-- `Downloads/Mac-Dynamic-Island-1.0.1-Apple-Silicon.pkg`：M 芯片安装包，双击安装到 `/Applications`
-- `Downloads/Mac-Dynamic-Island-1.0.1-Intel.pkg`：Intel 芯片安装包
+- `Downloads/Mac灵动岛_M芯片_1.0.1.pkg`：M 芯片安装包，双击安装到 `/Applications`
+- `Downloads/Mac灵动岛_intel_1.0.1.pkg`：intel 芯片安装包
 
 - 双击 `安装灵动岛.command` 会自动覆盖安装到 `/Applications/灵动岛.app`
 - 也可以手动把 `灵动岛.app` 拖到 Applications
