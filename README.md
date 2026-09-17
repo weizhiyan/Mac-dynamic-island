@@ -20,9 +20,9 @@
 
 在 [Releases](https://github.com/weizhiyan/Mac-dynamic-island/releases) 下载最新版本：
 
-- `Mac灵动岛_M芯片_1.0.2.pkg`：Apple Silicon
-- `Mac灵动岛_intel_1.0.2.pkg`：Intel
-- `Windows灵动岛_1.0.2.zip`：Windows 10 / 11（解压后运行 `DynamicIsland.exe`）
+- `Mac-Dynamic-Island-1.0.2.pkg`：Apple Silicon
+- `Mac-Dynamic-Island-1.0.2-intel.pkg`：Intel
+- `Windows-Dynamic-Island-1.0.2.zip`：Windows 10 / 11（解压后运行 `DynamicIsland.exe`）
 
 Mac 也可以双击 `安装灵动岛.command` 覆盖安装到 `/Applications/灵动岛.app`，或把 `灵动岛.app` 拖进 Applications。安装脚本会清理旧版 `DynamicIsland.app` 和重复的 `灵动岛.app`。
 

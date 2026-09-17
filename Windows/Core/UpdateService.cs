@@ -6,7 +6,7 @@ namespace DynamicIsland.Core;
 
 /// <summary>
 /// 对照 GitHub Release 检查 Windows 版是否有新版本。
-/// 更新包是同一仓库 Release 上的 <c>Windows灵动岛_*.zip</c>，不另开仓库。
+/// 更新包是同一仓库 Release 上的 <c>Windows-Dynamic-Island-*.zip</c>，不另开仓库。
 /// </summary>
 public static class UpdateService
 {

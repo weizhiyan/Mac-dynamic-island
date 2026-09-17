@@ -32,13 +32,13 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ github.ref_name }}".TrimStart("v")
-          Compress-Archive -Path publish/windows/* -DestinationPath "Windows灵动岛_$ver.zip"
+          Compress-Archive -Path publish/windows/* -DestinationPath "Windows-Dynamic-Island-$ver.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-zip
-          path: Windows灵动岛_*.zip
+          path: Windows-Dynamic-Island-*.zip
 
   publish:
     needs: windows
@@ -55,6 +55,11 @@ jobs:
       - name: Resolve version
         run: echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
+      - name: Stage ASCII assets
+        run: |
+          cp "Downloads/Mac灵动岛_M芯片_${RELEASE_VERSION}.pkg" "Mac-Dynamic-Island-${RELEASE_VERSION}.pkg"
+          cp "Downloads/Mac灵动岛_intel_${RELEASE_VERSION}.pkg" "Mac-Dynamic-Island-${RELEASE_VERSION}-intel.pkg"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -62,6 +67,6 @@ jobs:
           tag_name: "${{ github.ref_name }}"
           body_path: "Docs/releases/${{ github.ref_name }}.md"
           files: |
-            Downloads/Mac灵动岛_M芯片_${{ env.RELEASE_VERSION }}.pkg
-            Downloads/Mac灵动岛_intel_${{ env.RELEASE_VERSION }}.pkg
-            Windows灵动岛_${{ env.RELEASE_VERSION }}.zip
+            Mac-Dynamic-Island-${{ env.RELEASE_VERSION }}.pkg
+            Mac-Dynamic-Island-${{ env.RELEASE_VERSION }}-intel.pkg
+            Windows-Dynamic-Island-${{ env.RELEASE_VERSION }}.zip

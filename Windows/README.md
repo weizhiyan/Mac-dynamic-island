@@ -2,7 +2,7 @@
 
 基于 macOS 版「灵动岛」用 C# / WPF 复刻的快捷启动工具：鼠标滑到屏幕顶部即展开黑色岛体、露出应用图标网格，点击启动应用。目标是与 Mac 版观感 1:1。
 
-> 源码在 Mac 仓库的 `Windows/` 目录。安装包是 GitHub Release 上的 `Windows灵动岛_*.zip`，不另开仓库。
+> 源码在 Mac 仓库的 `Windows/` 目录。安装包是 GitHub Release 上的 `Windows-Dynamic-Island-*.zip`，不另开仓库。
 
 ## 环境要求
 
