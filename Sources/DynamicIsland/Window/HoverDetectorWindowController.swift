@@ -3,6 +3,7 @@ import AppKit
 final class HoverDetectorWindowController: NSWindowController {
     private let onEnter: () -> Void
     private let onLeave: () -> Void
+    private let onScreenChanged: (() -> Void)?
     private let onMouseMove: ((CGFloat) -> Void)?
     private let islandFrameProvider: () -> NSRect?
     private var pollTimer: Timer?
@@ -10,12 +11,14 @@ final class HoverDetectorWindowController: NSWindowController {
     private var enterWorkItem: DispatchWorkItem?
     private var leaveWorkItem: DispatchWorkItem?
     private var previewWindow: NSWindow?
+    private var lastScreenFrame: CGRect?
 
-    init(islandFrameProvider: @escaping () -> NSRect?, onEnter: @escaping () -> Void, onLeave: @escaping () -> Void, onMouseMove: ((CGFloat) -> Void)? = nil) {
+    init(islandFrameProvider: @escaping () -> NSRect?, onEnter: @escaping () -> Void, onLeave: @escaping () -> Void, onMouseMove: ((CGFloat) -> Void)? = nil, onScreenChanged: (() -> Void)? = nil) {
         self.islandFrameProvider = islandFrameProvider
         self.onEnter = onEnter
         self.onLeave = onLeave
         self.onMouseMove = onMouseMove
+        self.onScreenChanged = onScreenChanged
         let window = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -36,8 +39,17 @@ final class HoverDetectorWindowController: NSWindowController {
         pollTimer?.invalidate()
     }
 
+    func refreshScreenGeometry() {
+        let notch = NotchDetector.current()
+        window?.setFrame(notch.frame, display: true)
+        if let previewWindow {
+            let zone = activationZone(notch: notch)
+            previewWindow.setFrame(zone, display: true)
+        }
+    }
+
     func showActivationZonePreview(duration: TimeInterval = 3.0) {
-        let zone = activationZone(notchFrame: NotchDetector.current().frame)
+        let zone = activationZone(notch: NotchDetector.current())
         let preview: NSWindow
 
         if let previewWindow {
@@ -82,9 +94,14 @@ final class HoverDetectorWindowController: NSWindowController {
     private func handleMouseMoved() {
         let location = NSEvent.mouseLocation
 
-        let notchFrame = NotchDetector.current().frame
+        let notch = NotchDetector.current()
+        if lastScreenFrame != notch.screenFrame {
+            lastScreenFrame = notch.screenFrame
+            onScreenChanged?()
+        }
+        let notchFrame = notch.frame
         let islandFrame = islandFrameProvider()
-        let zone = activationZone(notchFrame: notchFrame)
+        let zone = activationZone(notch: notch)
 
         if let islandFrame, islandFrame.contains(location) {
             if !isInside {
@@ -135,16 +152,37 @@ final class HoverDetectorWindowController: NSWindowController {
         callback(normalized)
     }
 
-    private func activationZone(notchFrame: NSRect) -> NSRect {
-        // 触发区域：水平居中于刘海，纵向位置由 hoverZoneYOffset 控制
+    private func activationZone(notch: NotchArea) -> NSRect {
+        // 触发区域：水平居中于当前目标屏幕，纵向位置由 hoverZoneYOffset 控制
         // - offset = 0：紧贴刘海底部下方（鼠标可达的最高位置）
         // - offset > 0：向上移（进入刘海物理区域，鼠标可能无法到达）
         // 关键：带刘海的 MacBook 上，macOS 会限制鼠标不能进入刘海物理区域，
-        // 鼠标能到达的最高 y ≈ notchFrame.minY（刘海底部），而不是 notchFrame.maxY（屏幕物理顶部）。
+        // 鼠标能到达的最高 y ≈ notch.frame.minY（刘海底部），而不是屏幕物理顶部。
         let settings = SettingsStore.shared
         let width = settings.hoverZoneWidth
         let height = settings.hoverZoneHeight
-        let y = notchFrame.minY - height + settings.hoverZoneYOffset
-        return NSRect(x: notchFrame.midX - width / 2, y: y, width: width, height: height)
+        let y: CGFloat
+        if notch.topInset > 0 {
+            y = notch.frame.minY - height + settings.hoverZoneYOffset
+        } else {
+            y = notch.screenFrame.maxY - height - 1
+        }
+        let zone = NSRect(x: notch.anchor.x - width / 2, y: y, width: width, height: height)
+        return clampedToScreen(zone, screenFrame: notch.screenFrame)
+    }
+
+    /// 把触发区收进屏幕可见范围内。
+    /// 没有这层兜底时，只要屏幕高度算错（例如把无刘海的副屏当成目标屏，
+    /// 刘海高度回退成 24 再叠加 hoverZoneYOffset），整条触发区就会落到屏幕上边缘之外，
+    /// 鼠标永远进不去 —— 悬停彻底失效。
+    private func clampedToScreen(_ zone: NSRect, screenFrame: NSRect) -> NSRect {
+        let bounds = screenFrame
+        guard zone.height <= bounds.height, zone.width <= bounds.width else { return zone }
+        var result = zone
+        // 顶端最多贴到屏幕最上面一行像素（maxY 本身不属于可见区域）
+        result.origin.y = min(result.origin.y, bounds.maxY - zone.height - 1)
+        result.origin.y = max(result.origin.y, bounds.minY)
+        result.origin.x = min(max(result.origin.x, bounds.minX), bounds.maxX - zone.width)
+        return result
     }
 }

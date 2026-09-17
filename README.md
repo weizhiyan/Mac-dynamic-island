@@ -18,15 +18,15 @@
 
 ## 安装
 
-下载最新的安装包：
+在 [Releases](https://github.com/weizhiyan/Mac-dynamic-island/releases) 下载最新版本：
 
-- `Downloads/Mac灵动岛_M芯片_1.0.1.pkg`：M 芯片安装包，双击安装到 `/Applications`
-- `Downloads/Mac灵动岛_intel_1.0.1.pkg`：intel 芯片安装包
+- `Mac灵动岛_M芯片_1.0.2.pkg`：Apple Silicon
+- `Mac灵动岛_intel_1.0.2.pkg`：Intel
+- `Windows灵动岛_1.0.2.zip`：Windows 10 / 11（解压后运行 `DynamicIsland.exe`）
 
-- 双击 `安装灵动岛.command` 会自动覆盖安装到 `/Applications/灵动岛.app`
-- 也可以手动把 `灵动岛.app` 拖到 Applications
+Mac 也可以双击 `安装灵动岛.command` 覆盖安装到 `/Applications/灵动岛.app`，或把 `灵动岛.app` 拖进 Applications。安装脚本会清理旧版 `DynamicIsland.app` 和重复的 `灵动岛.app`。
 
-安装脚本会清理旧版 `DynamicIsland.app` 和重复的 `灵动岛.app`，避免同一台 Mac 上出现多个副本。
+已安装 1.0.1 的 Mac 用户可在菜单栏或设置里点「检查更新」。Windows 用户同样可在托盘或设置里检查更新。
 
 ## 从源码运行
 
@@ -39,12 +39,13 @@ swift build
 
 ## 项目结构
 
-- `Sources/DynamicIsland`：应用源码
+- `Sources/DynamicIsland`：Mac 应用源码
 - `Sources/DynamicIsland/Resources`：应用图标、状态栏图标和资源
+- `Windows`：Windows 版（C# / WPF），不另开仓库
 - `Scripts/build-dmg.command`：构建可安装 DMG
 - `Scripts/build-pkg.command`：构建 macOS `.pkg` 安装包
 - `Scripts/install-local.command`：本地覆盖安装脚本
 - `Scripts/release.sh`：生成安装包、更新 `appcast.xml`，并通过 git 推送到 GitHub
 - `Scripts/generate-appcast.command`：生成 Sparkle 更新源，需要本机 Keychain 里有对应私钥，或设置 `SPARKLE_ED_PRIVATE_KEY`
-- `appcast.xml`：Sparkle 更新源
+- `appcast.xml`：Mac Sparkle 更新源
 - `Docs/releases`：发布说明

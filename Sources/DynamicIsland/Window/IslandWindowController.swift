@@ -118,6 +118,7 @@ final class IslandWindowController: NSWindowController {
         // NSWindowController 绑定 gooey 窗口（主窗口）
         super.init(window: gooeyWindow)
         Self.shared = self
+        attachContentWindow()
         positionCompact()
         setupLayoutObservers()
     }
@@ -148,7 +149,15 @@ final class IslandWindowController: NSWindowController {
             .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.rebuildLayout() }
             .store(in: &cancellables)
+        s.$appFilterMode
+            .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.rebuildLayout() }
+            .store(in: &cancellables)
         AppStore.shared.$apps
+            .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.rebuildLayout() }
+            .store(in: &cancellables)
+        AppStore.shared.$filterApps
             .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.rebuildLayout() }
             .store(in: &cancellables)
@@ -218,11 +227,13 @@ final class IslandWindowController: NSWindowController {
         contentWindow.alphaValue = 1
         hostingView.alphaValue = 0
 
+        attachContentWindow()
         gooeyWindow.orderFrontRegardless()
         contentWindow.orderFrontRegardless()
 
         animateExpand(duration: settings.expandDuration)
         fadeContent(visible: true, delay: settings.revealDelay)
+        ClickProbe.log("内容窗口 frame=\(contentRect) 图标=\(settings.iconSize) 间距=\(settings.iconSpacing) 列=\(settings.columns) 左右边距=\(settings.contentPadding) 顶部=\(settings.effectiveContentTopPadding)")
         DispatchQueue.main.asyncAfter(deadline: .now() + settings.revealDelay) {
             IslandViewModel.shared.isExpanded = true
         }
@@ -233,6 +244,7 @@ final class IslandWindowController: NSWindowController {
         let settings = SettingsStore.shared
         isExpanded = false
         IslandViewModel.shared.isExpanded = false
+        TooltipNSView.dismissActiveTip()
         contentWindow.ignoresMouseEvents = true
         fadeContent(visible: false, delay: 0)
         animateCollapse(duration: settings.collapseDuration)
@@ -249,6 +261,7 @@ final class IslandWindowController: NSWindowController {
     func hideIslandImmediately() {
         isExpanded = false
         IslandViewModel.shared.isExpanded = false
+        TooltipNSView.dismissActiveTip()
         mainBodyLayer.removeAllAnimations()
         hostingView.alphaValue = 0
         contentWindow.ignoresMouseEvents = true
@@ -258,6 +271,50 @@ final class IslandWindowController: NSWindowController {
         gooeyWindow.orderOut(nil)
     }
 
+    func refreshForCurrentScreen() {
+        let settings = SettingsStore.shared
+        let height = settings.expandedHeight
+        let topBarHeight = settings.topBarHeight
+        let topBarWidth = settings.topBarWidth
+        let expandedWidth = settings.expandedWidth
+        let totalHeight = height + topBarHeight
+
+        blurFilter?.setValue(settings.gooeyBlurRadius, forKey: kCIInputRadiusKey)
+        gooeyContainer.frame = CGRect(x: 0, y: 0, width: topBarWidth, height: totalHeight)
+        topBarLayer.frame = CGRect(x: 0, y: height, width: topBarWidth, height: topBarHeight)
+        mainBodyLayer.frame = CGRect(x: 0, y: 0, width: topBarWidth, height: totalHeight)
+
+        if isExpanded {
+            let frames = expandedFrames()
+            let expandedRect = CGRect(x: (topBarWidth - expandedWidth) / 2, y: 0, width: expandedWidth, height: height)
+
+            attachContentWindow()
+            gooeyWindow.setFrame(frames.gooey, display: false)
+            contentWindow.setFrame(frames.content, display: false)
+            gooeyWindow.alphaValue = 1
+            contentWindow.alphaValue = 1
+            contentWindow.ignoresMouseEvents = false
+            hostingView.alphaValue = 1
+            gooeyWindow.orderFrontRegardless()
+            contentWindow.orderFrontRegardless()
+            mainBodyLayer.path = islandPath(rect: expandedRect, topRadius: 0, bottomRadius: settings.expandedCornerRadius)
+        } else {
+            let initialBodyWidth = settings.compactWidth
+            let initialBodyHeight = settings.compactHeight
+            let bodyX = (topBarWidth - initialBodyWidth) / 2
+            let compactRect = CGRect(x: bodyX, y: height - initialBodyHeight, width: initialBodyWidth, height: initialBodyHeight)
+            mainBodyLayer.path = CGPath(roundedRect: compactRect, cornerWidth: settings.compactCornerRadius, cornerHeight: settings.compactCornerRadius, transform: nil)
+            contentWindow.setFrame(NSRect(x: 0, y: 0, width: expandedWidth, height: height), display: false)
+            positionCompact()
+        }
+    }
+
+    private func attachContentWindow() {
+        guard contentWindow.parent !== gooeyWindow else { return }
+        contentWindow.parent?.removeChildWindow(contentWindow)
+        gooeyWindow.addChildWindow(contentWindow, ordered: .above)
+    }
+
     private func positionCompact() {
         let settings = SettingsStore.shared
         let notch = NotchDetector.current()
@@ -265,14 +322,14 @@ final class IslandWindowController: NSWindowController {
         let topBarHeight = settings.topBarHeight
         let topBarWidth = settings.topBarWidth
         let expandedWidth = settings.expandedWidth
-        let windowBottom = notch.frame.minY - height + settings.topBarYOffset
+        let windowBottom = windowBottom(for: notch, bodyHeight: height, topBarHeight: topBarHeight, yOffset: settings.topBarYOffset)
 
-        let gooeyRect = NSRect(x: notch.anchor.x - topBarWidth / 2, y: windowBottom, width: topBarWidth, height: height + topBarHeight)
+        let gooeyRect = NSRect(x: centeredX(anchor: notch.anchor.x, width: topBarWidth, in: notch.screenFrame), y: windowBottom, width: topBarWidth, height: height + topBarHeight)
         gooeyWindow.setFrame(gooeyRect, display: false)
         gooeyWindow.alphaValue = 1
         gooeyWindow.orderFrontRegardless()
 
-        let contentRect = NSRect(x: notch.anchor.x - expandedWidth / 2, y: windowBottom, width: expandedWidth, height: height)
+        let contentRect = NSRect(x: centeredX(anchor: notch.anchor.x, width: expandedWidth, in: notch.screenFrame), y: windowBottom, width: expandedWidth, height: height)
         contentWindow.setFrame(contentRect, display: false)
         contentWindow.ignoresMouseEvents = true
         contentWindow.alphaValue = 0
@@ -287,11 +344,26 @@ final class IslandWindowController: NSWindowController {
         let topBarHeight = settings.topBarHeight
         let topBarWidth = settings.topBarWidth
         let expandedWidth = settings.expandedWidth
-        let windowBottom = notch.frame.minY - height + settings.topBarYOffset
+        let windowBottom = windowBottom(for: notch, bodyHeight: height, topBarHeight: topBarHeight, yOffset: settings.topBarYOffset)
 
-        let gooey = NSRect(x: notch.anchor.x - topBarWidth / 2, y: windowBottom, width: topBarWidth, height: height + topBarHeight)
-        let content = NSRect(x: notch.anchor.x - expandedWidth / 2, y: windowBottom, width: expandedWidth, height: height)
+        let gooey = NSRect(x: centeredX(anchor: notch.anchor.x, width: topBarWidth, in: notch.screenFrame), y: windowBottom, width: topBarWidth, height: height + topBarHeight)
+        let content = NSRect(x: centeredX(anchor: notch.anchor.x, width: expandedWidth, in: notch.screenFrame), y: windowBottom, width: expandedWidth, height: height)
         return (gooey, content)
+    }
+
+    private func windowBottom(
+        for notch: NotchArea, bodyHeight: CGFloat, topBarHeight: CGFloat, yOffset: CGFloat
+    ) -> CGFloat {
+        guard notch.topInset > 0 else {
+            // 无刘海屏：把整个窗口放在屏幕顶部以内，避免沿用刘海偏移后出屏。
+            return notch.screenFrame.maxY - bodyHeight - topBarHeight
+        }
+        return notch.frame.minY - bodyHeight + yOffset
+    }
+
+    private func centeredX(anchor: CGFloat, width: CGFloat, in screenFrame: CGRect) -> CGFloat {
+        let proposed = anchor - width / 2
+        return max(screenFrame.minX, min(proposed, screenFrame.maxX - width))
     }
 
     private func fadeContent(visible: Bool, delay: TimeInterval) {

@@ -9,3 +9,9 @@ DerivedData/
 .claude/
 .figma/
 .trae/
+.codex/
+.workbuddy/
+
+# Windows 构建产物（源码在 Windows/，纳入本仓库）
+Windows/bin/
+Windows/obj/

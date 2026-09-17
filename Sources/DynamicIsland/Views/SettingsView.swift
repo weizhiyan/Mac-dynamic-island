@@ -37,6 +37,8 @@ struct SettingsView: View {
         switch selectedPane ?? .overview {
         case .overview:
             overviewPane
+        case .appFilter:
+            appFilterPane
         case .appearance:
             appearancePane
         case .trigger:
@@ -58,7 +60,7 @@ struct SettingsView: View {
 
             SettingsGroup("常用调整") {
                 SliderSetting(title: "图标大小", value: $settings.iconSize.doubleValue, range: 32...72, step: 1, suffix: "px")
-                StepperSetting(title: "每行列数", value: $settings.columns, range: 3...8, suffix: "列")
+                StepperSetting(title: "每行列数", value: $settings.columns, range: 3...12, suffix: "列")
                 SliderSetting(title: "图标间距", value: $settings.iconSpacing.doubleValue, range: 6...24, step: 1, suffix: "px")
                 SliderSetting(title: "顶部内边距", value: $settings.contentTopPadding.doubleValue, range: 10...46, step: 1, suffix: "px")
             }
@@ -164,11 +166,86 @@ struct SettingsView: View {
         }
     }
 
+    private var appFilterPane: some View {
+        SettingsPage(title: "应用过滤", subtitle: "设置岛屿展开时的应用显示规则。") {
+            SettingsGroup("过滤方式") {
+                Picker("过滤方式", selection: $settings.appFilterMode) {
+                    ForEach(AppFilterMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Label(settings.appFilterMode.summary, systemImage: "info.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                if settings.appFilterMode == .allowlist && appStore.filterApps.isEmpty {
+                    Label("仅显示名单应用时，名单为空会让岛屿不显示任何快捷应用。", systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            SettingsGroup("过滤名单") {
+                HStack {
+                    Text("\(appStore.filterApps.count) 个应用")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        appStore.clearFilterApps()
+                    } label: {
+                        Label("清空", systemImage: "trash")
+                    }
+                    .disabled(appStore.filterApps.isEmpty)
+
+                    Button {
+                        openFilterAppPicker()
+                    } label: {
+                        Label("添加应用", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                let sortedApps = appStore.filterApps.sorted(by: { $0.order < $1.order })
+                if sortedApps.isEmpty {
+                    EmptyState(title: "还没有过滤应用", symbol: "line.3.horizontal.decrease.circle")
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 88, maximum: 108), spacing: 12)], alignment: .leading, spacing: 12) {
+                        ForEach(sortedApps) { app in
+                            AppTile(app: app, isDragging: false) {
+                                appStore.removeFilterApp(app)
+                            }
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.16), value: sortedApps)
+                }
+            }
+        }
+    }
+
+    private func openFilterAppPicker() {
+        let panel = NSOpenPanel()
+        panel.title = "选择过滤应用"
+        panel.prompt = "添加"
+        panel.message = "添加到过滤名单后，会根据过滤方式显示或隐藏"
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.resolvesAliases = true
+
+        if panel.runModal() == .OK {
+            appStore.addFilterApps(at: panel.urls)
+        }
+    }
+
     private var appearancePane: some View {
         SettingsPage(title: "外观布局", subtitle: "调整收缩态、展开态和内容网格的视觉尺寸。") {
             SettingsGroup("应用网格") {
                 SliderSetting(title: "图标大小", value: $settings.iconSize.doubleValue, range: 32...72, step: 1, suffix: "px")
-                StepperSetting(title: "每行列数", value: $settings.columns, range: 3...8, suffix: "列")
+                StepperSetting(title: "每行列数", value: $settings.columns, range: 3...12, suffix: "列")
                 SliderSetting(title: "图标间距", value: $settings.iconSpacing.doubleValue, range: 6...24, step: 1, suffix: "px")
                 SliderSetting(title: "顶部内边距", value: $settings.contentTopPadding.doubleValue, range: 10...46, step: 1, suffix: "px")
             }
@@ -224,6 +301,7 @@ struct SettingsView: View {
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case overview
+    case appFilter
     case appearance
     case trigger
     case animation
@@ -233,6 +311,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .overview: "基础设置"
+        case .appFilter: "应用过滤"
         case .appearance: "外观布局"
         case .trigger: "触发方式"
         case .animation: "动画"
@@ -242,6 +321,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .overview: "gearshape"
+        case .appFilter: "line.3.horizontal.decrease.circle"
         case .appearance: "paintbrush"
         case .trigger: "cursorarrow"
         case .animation: "timelapse"

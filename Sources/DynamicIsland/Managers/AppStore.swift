@@ -7,12 +7,17 @@ final class AppStore: ObservableObject {
     @Published var apps: [AppItem] {
         didSet { saveApps() }
     }
+    @Published var filterApps: [AppItem] {
+        didSet { saveFilterApps() }
+    }
 
     private let defaults = UserDefaults.standard
     private static let appsKey = "shortcutApps"
+    private static let filterAppsKey = "filterApps"
 
     private init() {
         apps = Self.loadApps() ?? Self.defaultApps()
+        filterApps = Self.loadFilterApps() ?? []
     }
 
     func addApps(at urls: [URL]) {
@@ -55,6 +60,46 @@ final class AppStore: ObservableObject {
         normalizeOrder()
     }
 
+    func addFilterApps(at urls: [URL]) {
+        urls.forEach { addFilterApp(at: $0) }
+        normalizeFilterOrder()
+    }
+
+    func addFilterApp(at url: URL) {
+        let resolvedURL = url.resolvingSymlinksInPath()
+        let path = resolvedURL.path
+        guard !filterApps.contains(where: { $0.path == path }) else { return }
+
+        let bundle = Bundle(url: resolvedURL)
+        let displayName = bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? resolvedURL.deletingPathExtension().lastPathComponent
+        let bundleId = bundle?.bundleIdentifier
+        let nextOrder = (filterApps.map(\.order).max() ?? -1) + 1
+        filterApps.append(AppItem(name: displayName, bundleId: bundleId, path: path, order: nextOrder))
+    }
+
+    func removeFilterApp(_ item: AppItem) {
+        filterApps.removeAll { $0.id == item.id }
+        normalizeFilterOrder()
+    }
+
+    func clearFilterApps() {
+        filterApps.removeAll()
+    }
+
+    func visibleApps(for mode: AppFilterMode) -> [AppItem] {
+        let orderedApps = apps.sorted(by: { $0.order < $1.order })
+        switch mode {
+        case .none:
+            return orderedApps
+        case .allowlist:
+            return orderedApps.filter(isInFilterList)
+        case .denylist:
+            return orderedApps.filter { !isInFilterList($0) }
+        }
+    }
+
     func restoreDefaultApps() {
         apps = Self.defaultApps()
     }
@@ -78,15 +123,45 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private func normalizeFilterOrder() {
+        filterApps = filterApps.sorted(by: { $0.order < $1.order }).enumerated().map { index, item in
+            var updated = item
+            updated.order = index
+            return updated
+        }
+    }
+
+    private func isInFilterList(_ item: AppItem) -> Bool {
+        filterApps.contains { filterItem in
+            if let bundleId = item.bundleId, let filterBundleId = filterItem.bundleId {
+                return bundleId == filterBundleId
+            }
+            return item.path == filterItem.path
+        }
+    }
+
     private func saveApps() {
         guard let data = try? JSONEncoder().encode(apps) else { return }
         defaults.set(data, forKey: Self.appsKey)
+    }
+
+    private func saveFilterApps() {
+        guard let data = try? JSONEncoder().encode(filterApps) else { return }
+        defaults.set(data, forKey: Self.filterAppsKey)
     }
 
     private static func loadApps() -> [AppItem]? {
         guard let data = UserDefaults.standard.data(forKey: appsKey),
               let apps = try? JSONDecoder().decode([AppItem].self, from: data),
               !apps.isEmpty else {
+            return nil
+        }
+        return apps
+    }
+
+    private static func loadFilterApps() -> [AppItem]? {
+        guard let data = UserDefaults.standard.data(forKey: filterAppsKey),
+              let apps = try? JSONDecoder().decode([AppItem].self, from: data) else {
             return nil
         }
         return apps

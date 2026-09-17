@@ -5,8 +5,8 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT_DIR/Build"
 APP_PRODUCT="DynamicIsland"
 APP_DISPLAY_NAME="灵动岛"
-APP_VERSION="${APP_VERSION:-1.0.1}"
-APP_BUILD="${APP_BUILD:-2}"
+APP_VERSION="${APP_VERSION:-1.0.2}"
+APP_BUILD="${APP_BUILD:-3}"
 APPCAST_URL="${APPCAST_URL:-https://raw.githubusercontent.com/weizhiyan/Mac-dynamic-island/main/appcast.xml}"
 SPARKLE_PUBLIC_KEY="28WnLNAVZfPjPPkIQIZlni3sSjuwE8kvn3nPAT2X/W8="
 APP_BUNDLE="$BUILD_DIR/$APP_DISPLAY_NAME.app"
@@ -26,9 +26,9 @@ if [[ -n "$BUILD_ARCH" ]]; then
   BUILD_ARCH_FLAGS=(--arch "$BUILD_ARCH")
 fi
 
-swift build -c release --product "$APP_PRODUCT" "${BUILD_ARCH_FLAGS[@]}"
+swift build -c release --disable-sandbox --product "$APP_PRODUCT" "${BUILD_ARCH_FLAGS[@]}"
 
-BIN_DIR="$(swift build -c release --show-bin-path "${BUILD_ARCH_FLAGS[@]}")"
+BIN_DIR="$(swift build -c release --disable-sandbox --show-bin-path "${BUILD_ARCH_FLAGS[@]}")"
 BINARY_PATH="$BIN_DIR/$APP_PRODUCT"
 if [[ -z "${BINARY_PATH:-}" ]]; then
   echo "Could not find built binary."
@@ -114,9 +114,25 @@ find "$APP_BUNDLE" -xattrname 'com.apple.fileprovider.fpfs#P' -exec xattr -d 'co
 rm -rf "$SIGNING_ROOT"
 mkdir -p "$SIGNING_ROOT"
 ditto --norsrc --noextattr --noacl --noqtn "$APP_BUNDLE" "$SIGNED_APP_BUNDLE"
-codesign --force --sign - --deep "$SIGNED_APP_BUNDLE" >/dev/null
+# 优先用自签名证书 LingDongDaoDev（签名身份跨构建稳定，TCC 权限授权一次永久有效）；
+# 没有则退回 adhoc 签名（每次重建后需在系统设置里重新授权）
+SIGN_IDENTITY="${SIGN_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" ]] && security find-identity -v -p codesigning 2>/dev/null | grep -q "LingDongDaoDev"; then
+  SIGN_IDENTITY="LingDongDaoDev"
+fi
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  echo "使用稳定签名身份：$SIGN_IDENTITY"
+  codesign --force --sign "$SIGN_IDENTITY" --deep "$SIGNED_APP_BUNDLE" >/dev/null
+else
+  echo "未找到签名证书，使用 adhoc 签名"
+  codesign --force --sign - --deep "$SIGNED_APP_BUNDLE" >/dev/null
+fi
 rm -rf "$APP_BUNDLE"
 ditto --norsrc --noextattr --noacl --noqtn "$SIGNED_APP_BUNDLE" "$APP_BUNDLE"
 if [[ "${NO_OPEN:-0}" != "1" ]]; then
+  # 先收掉旧进程再开新的：同一个 bundle id 跑两份时，两条收纳分隔符会互相挤，
+  # 后启动的那条会被推到屏幕外（实测读到 x=-3805），收纳落点就会算到屏幕外去。
+  pkill -f "灵动岛.app/Contents/MacOS/DynamicIsland" 2>/dev/null || true
+  sleep 1
   open -n "$APP_BUNDLE"
 fi

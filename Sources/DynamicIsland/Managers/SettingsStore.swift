@@ -6,9 +6,35 @@ enum IslandMode: String, CaseIterable {
     case systemNotch
 }
 
+enum AppFilterMode: String, CaseIterable, Identifiable {
+    case none
+    case allowlist
+    case denylist
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .none: "不过滤"
+        case .allowlist: "仅显示名单应用"
+        case .denylist: "隐藏名单应用"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .none: "岛屿会显示快捷应用列表中的所有应用。"
+        case .allowlist: "岛屿只显示过滤名单中的快捷应用。"
+        case .denylist: "岛屿会隐藏过滤名单中的快捷应用。"
+        }
+    }
+}
+
 final class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
     private let defaults = UserDefaults.standard
+    private static let minColumns = 3
+    private static let maxColumns = 12
 
     // MARK: - 应用网格
     /// 应用图标尺寸（像素）
@@ -17,7 +43,14 @@ final class SettingsStore: ObservableObject {
     }
     /// 应用网格列数
     @Published var columns: Int {
-        didSet { defaults.set(columns, forKey: Key.columns) }
+        didSet {
+            let clamped = Self.clampColumns(columns)
+            if clamped != columns {
+                columns = clamped
+                return
+            }
+            defaults.set(columns, forKey: Key.columns)
+        }
     }
     /// 应用图标间距（像素）
     @Published var iconSpacing: CGFloat {
@@ -107,11 +140,16 @@ final class SettingsStore: ObservableObject {
         let cols = max(1, columns)
         return CGFloat(cols) * iconSize + CGFloat(cols - 1) * iconSpacing + contentPadding * 2
     }
+    /// 内容实际顶部间距 — 预留顶部快捷按钮区域，避免小尺寸下与应用图标重叠
+    var effectiveContentTopPadding: CGFloat {
+        max(contentTopPadding, 34)
+    }
     /// 展开态岛屿高度 — 根据图标行数、尺寸、间距、内边距自动计算
     var expandedHeight: CGFloat {
         let cols = max(1, columns)
-        let rows = max(1, Int(ceil(Double(AppStore.shared.apps.count) / Double(cols))))
-        return CGFloat(rows) * iconSize + CGFloat(rows - 1) * iconSpacing + contentTopPadding + contentPadding
+        let visibleCount = AppStore.shared.visibleApps(for: appFilterMode).count
+        let rows = max(1, Int(ceil(Double(visibleCount) / Double(cols))))
+        return CGFloat(rows) * iconSize + CGFloat(rows - 1) * iconSpacing + effectiveContentTopPadding + contentPadding
     }
 
     // MARK: - 动画
@@ -192,6 +230,11 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(mode.rawValue, forKey: Key.mode) }
     }
 
+    // MARK: - 应用过滤
+    @Published var appFilterMode: AppFilterMode {
+        didSet { defaults.set(appFilterMode.rawValue, forKey: Key.appFilterMode) }
+    }
+
     // MARK: - 系统
     @Published var launchAtLoginEnabled: Bool {
         didSet {
@@ -242,8 +285,12 @@ final class SettingsStore: ObservableObject {
         static let bulgeCornerRadius = "bulgeCornerRadius"
         // 模式
         static let mode = "islandMode"
+        // 应用过滤
+        static let appFilterMode = "appFilterMode"
         // 系统
         static let launchAtLoginEnabled = "launchAtLoginEnabled"
+        // 收纳应用（已废弃：收纳成员改为实时 AX 判定，不再落盘。留着 key 只为清理旧值）
+        static let pinnedAppBundleIDs = "pinnedAppBundleIDs"
         // 版本号 — 每次修改默认值时 +1，旧缓存会自动清空
         static let settingsVersion = "settingsVersion"
     }
@@ -251,6 +298,10 @@ final class SettingsStore: ObservableObject {
     /// 当前设置版本号。**修改任何默认值时务必 +1**，
     /// 这样老用户机器上的旧缓存会被自动清掉，新默认值才会生效。
     private static let currentVersion = 11
+
+    private static func clampColumns(_ value: Int) -> Int {
+        min(max(value, minColumns), maxColumns)
+    }
 
     private init() {
         let d = UserDefaults.standard
@@ -266,7 +317,8 @@ final class SettingsStore: ObservableObject {
                         Key.contentFadeInDuration, Key.contentFadeOutDuration,
                         Key.expandTimingCurve, Key.collapseTimingCurve,
                         Key.compactCornerRadius, Key.expandedCornerRadius, Key.bulgeCornerRadius,
-                        Key.mode, Key.launchAtLoginEnabled] {
+                        Key.mode, Key.appFilterMode, Key.launchAtLoginEnabled,
+                        Key.pinnedAppBundleIDs] {
                 d.removeObject(forKey: key)
             }
             d.set(Self.currentVersion, forKey: Key.settingsVersion)
@@ -275,7 +327,7 @@ final class SettingsStore: ObservableObject {
         // 读取（此时若没有用户自定义值，就用代码里的最新默认值）
         // 应用网格
         iconSize = d.object(forKey: Key.iconSize) as? CGFloat ?? 60
-        columns = d.object(forKey: Key.columns) as? Int ?? 6
+        columns = Self.clampColumns(d.object(forKey: Key.columns) as? Int ?? 6)
         iconSpacing = d.object(forKey: Key.iconSpacing) as? CGFloat ?? 13
         // 悬停触发
         hoverZoneWidth = d.object(forKey: Key.hoverZoneWidth) as? CGFloat ?? 217
@@ -310,8 +362,12 @@ final class SettingsStore: ObservableObject {
         bulgeCornerRadius = d.object(forKey: Key.bulgeCornerRadius) as? CGFloat ?? 23
         // 模式
         mode = IslandMode(rawValue: d.string(forKey: Key.mode) ?? "") ?? .systemNotch
+        // 应用过滤
+        appFilterMode = AppFilterMode(rawValue: d.string(forKey: Key.appFilterMode) ?? "") ?? .none
         // 系统
         launchAtLoginEnabled = LoginItemManager.isEnabled
+        // 清掉旧版本落盘的收纳名单，现在收纳成员完全来自实时 AX 判定
+        d.removeObject(forKey: Key.pinnedAppBundleIDs)
     }
 
     /// 恢复所有参数到默认值（用于设置面板的「恢复默认」按钮）
@@ -347,6 +403,7 @@ final class SettingsStore: ObservableObject {
         expandedCornerRadius = 16
         bulgeCornerRadius = 23
         mode = .systemNotch
+        appFilterMode = .none
         launchAtLoginEnabled = false
     }
 }

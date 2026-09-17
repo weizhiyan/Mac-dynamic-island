@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-VERSION="${VERSION:-1.0.1}"
+VERSION="${VERSION:-1.0.2}"
 TAG="v$VERSION"
 REPO="${REPO:-weizhiyan/Mac-dynamic-island}"
 PKG="Release/Mac-Dynamic-Island-$VERSION.pkg"
@@ -49,3 +49,4 @@ git push origin "$TAG"
 echo "发布完成："
 echo "$DOWNLOAD_PREFIX$(basename "$PUBLIC_PKG")"
 echo "$DOWNLOAD_PREFIX$(basename "$PUBLIC_INTEL_PKG")"
+echo "Windows 压缩包由 GitHub Actions 在打 tag 后编译并挂到同一条 Release。"
