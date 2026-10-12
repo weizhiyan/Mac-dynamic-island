@@ -22,7 +22,7 @@ public static class UpdateService
         get
         {
             var v = typeof(UpdateService).Assembly.GetName().Version;
-            return v == null ? "1.0.3" : $"{v.Major}.{v.Minor}.{v.Build}";
+            return v == null ? "1.0.4" : $"{v.Major}.{v.Minor}.{v.Build}";
         }
     }
 

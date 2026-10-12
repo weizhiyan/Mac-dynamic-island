@@ -385,6 +385,11 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// 是否启用菜单栏图标收纳。关闭后会卸载收纳分隔符，并恢复已收纳图标。
+    @Published var menuBarStashEnabled: Bool {
+        didSet { defaults.set(menuBarStashEnabled, forKey: Key.menuBarStashEnabled) }
+    }
+
     // MARK: - Key 定义
     private enum Key {
         // 应用网格
@@ -437,6 +442,7 @@ final class SettingsStore: ObservableObject {
         // 系统
         static let mediaPlayerBundleID = "mediaPlayerBundleID"
         static let launchAtLoginEnabled = "launchAtLoginEnabled"
+        static let menuBarStashEnabled = "menuBarStashEnabled"
         // 收纳应用（已废弃：收纳成员改为实时 AX 判定，不再落盘。留着 key 只为清理旧值）
         static let pinnedAppBundleIDs = "pinnedAppBundleIDs"
         // 版本号 — 每次修改默认值时 +1，旧缓存会自动清空
@@ -467,6 +473,7 @@ final class SettingsStore: ObservableObject {
                         Key.expandTimingCurve, Key.collapseTimingCurve,
                         Key.compactCornerRadius, Key.expandedCornerRadius, Key.bulgeCornerRadius,
                         Key.mode, Key.mediaPlayerBundleID, Key.launchAtLoginEnabled,
+                        Key.menuBarStashEnabled,
                         Key.pinnedAppBundleIDs] {
                 d.removeObject(forKey: key)
             }
@@ -523,6 +530,8 @@ final class SettingsStore: ObservableObject {
         } else {
             mediaPlayerBundleID = FileManager.default.fileExists(atPath: "/Applications/Spotify.app") ? "com.spotify.client" : nil
         }
+
+        menuBarStashEnabled = d.object(forKey: Key.menuBarStashEnabled) as? Bool ?? true
         launchAtLoginEnabled = LoginItemManager.isEnabled
         // 自定义组件布局：先用空数组占位完成整体初始化，再回填 UserDefaults
         // （初始化期读取 self 的其他属性会触发「used before being initialized」）
@@ -571,6 +580,7 @@ final class SettingsStore: ObservableObject {
         mode = .systemNotch
         mediaPlayerBundleID = nil
         launchAtLoginEnabled = false
+        menuBarStashEnabled = true
         resetComponentLayout()
     }
 }

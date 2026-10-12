@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${VERSION:-1.0.3}"
+VERSION="${VERSION:-1.0.4}"
 REPO="${REPO:-weizhiyan/Mac-dynamic-island}"
 PKG="$ROOT_DIR/Release/Mac-Dynamic-Island-$VERSION.pkg"
 INTEL_PKG="$ROOT_DIR/Release/Mac-Dynamic-Island-$VERSION-intel.pkg"

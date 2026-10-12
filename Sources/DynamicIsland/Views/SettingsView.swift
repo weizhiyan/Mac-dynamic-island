@@ -107,6 +107,12 @@ struct SettingsView: View {
                 Toggle(isOn: $settings.launchAtLoginEnabled) {
                     Label("开机自启动", systemImage: "power")
                 }
+                Toggle(isOn: $settings.menuBarStashEnabled) {
+                    Label("菜单栏图标收纳", systemImage: "tray.and.arrow.down")
+                }
+                Text("关闭后不再安装收纳分隔符，已收纳的菜单栏图标会恢复显示；重新开启后可继续使用收纳功能。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             SettingsGroup("音乐播放") {

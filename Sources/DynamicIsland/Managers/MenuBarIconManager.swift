@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Combine
 
 /// 菜单栏状态项当前的可见性。
 enum MenuBarIconVisibility {
@@ -74,6 +75,7 @@ final class MenuBarIconManager: ObservableObject {
     @Published private(set) var lastMoveMessage: String?
 
     private var observers: [NSObjectProtocol] = []
+    private var settingsCancellable: AnyCancellable?
     private var refreshTimer: DispatchSourceTimer?
     /// 枚举走 40+ 进程的跨进程 AX 往返（实测 150~300ms），必须放后台队列：
     /// 在主线程跑会拖住点击菜单栏图标后的弹窗弹出。结果回主线程再发布。
@@ -121,15 +123,53 @@ final class MenuBarIconManager: ObservableObject {
     // MARK: - 启动 / 停止
 
     func start() {
-        MenuBarSectionHider.shared.installIfNeeded(collapseInitially: !savedStashBundleIDs.isEmpty)
-        setupObservers()
-        // 延迟首次枚举，等菜单栏上的其他应用把状态项都建好
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.refresh()
-        }
+        guard settingsCancellable == nil else { return }
+        let settings = SettingsStore.shared
+        settingsCancellable = settings.$menuBarStashEnabled
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                self?.applyStashEnabled(enabled)
+            }
+        applyStashEnabled(settings.menuBarStashEnabled)
     }
 
     func stop() {
+        settingsCancellable?.cancel()
+        settingsCancellable = nil
+        removeObservers()
+        arrangeEndWorkItem?.cancel()
+        arrangeEndWorkItem = nil
+        // 卸载分隔符，被收纳的图标恢复显示
+        MenuBarSectionHider.shared.uninstall()
+        allIcons.removeAll()
+    }
+
+    private func applyStashEnabled(_ enabled: Bool) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.applyStashEnabled(enabled) }
+            return
+        }
+        if enabled {
+            MenuBarSectionHider.shared.installIfNeeded(collapseInitially: !savedStashBundleIDs.isEmpty)
+            setupObservers()
+            // 延迟首次枚举，等菜单栏上的其他应用把状态项都建好。
+            after(1.0) { [weak self] in self?.refresh() }
+            return
+        }
+
+        arrangeEndWorkItem?.cancel()
+        arrangeEndWorkItem = nil
+        isArranging = false
+        restoringSavedPreferences = false
+        pendingSavedPreferenceRestores.removeAll()
+        removeObservers()
+        MenuBarSectionHider.shared.uninstall()
+        allIcons.removeAll()
+        lastMoveMessage = nil
+    }
+
+    private func removeObservers() {
         observers.forEach {
             NotificationCenter.default.removeObserver($0)
             NSWorkspace.shared.notificationCenter.removeObserver($0)
@@ -137,11 +177,6 @@ final class MenuBarIconManager: ObservableObject {
         observers.removeAll()
         refreshTimer?.cancel()
         refreshTimer = nil
-        arrangeEndWorkItem?.cancel()
-        arrangeEndWorkItem = nil
-        // 卸载分隔符，被收纳的图标恢复显示
-        MenuBarSectionHider.shared.uninstall()
-        allIcons.removeAll()
     }
 
     private func after(_ delay: TimeInterval, work: @escaping () -> Void) {
@@ -220,6 +255,7 @@ final class MenuBarIconManager: ObservableObject {
     /// 把分隔符收成可见窄条，左侧图标全部现身，用户按住 ⌘ 拖动即可加入/移出收纳。
     /// arrangeDuration 秒后自动恢复隐藏，免得用户忘了关。
     func beginArrange() {
+        guard SettingsStore.shared.menuBarStashEnabled else { return }
         arrangeEndWorkItem?.cancel()
         MenuBarSectionHider.shared.expand()
         isArranging = true
@@ -241,10 +277,16 @@ final class MenuBarIconManager: ObservableObject {
     // MARK: - 角标：收纳 / 恢复单个图标
 
     /// 把某个图标挪到分隔符左边 —— 也就是收纳起来。
-    func stash(bundleID: String) { move(bundleID: bundleID, toStash: true) }
+    func stash(bundleID: String) {
+        guard SettingsStore.shared.menuBarStashEnabled else { return }
+        move(bundleID: bundleID, toStash: true)
+    }
 
     /// 把某个图标挪回分隔符右边 —— 恢复到菜单栏上。
-    func unstash(bundleID: String) { move(bundleID: bundleID, toStash: false) }
+    func unstash(bundleID: String) {
+        guard SettingsStore.shared.menuBarStashEnabled else { return }
+        move(bundleID: bundleID, toStash: false)
+    }
 
     /// 把图标挪过分隔符的两种手段，按顺序试。
     private enum MoveStrategy: CaseIterable {
@@ -506,6 +548,7 @@ final class MenuBarIconManager: ObservableObject {
 
     /// 弹窗打开、屏幕变化等场景调用：全量枚举一次（后台跑，不卡界面）。
     func refresh() {
+        guard SettingsStore.shared.menuBarStashEnabled else { return }
         guard !shouldThrottleRefresh else { return }
         refreshQueue.async { [weak self] in self?.refreshNow() }
     }
@@ -543,6 +586,7 @@ final class MenuBarIconManager: ObservableObject {
     /// 轻量刷新：只重探已知元素的可见性，不遍历全部进程。
     /// 点击、整理这类高频路径走它，避免又一次 48 个进程的跨进程 AX 往返。
     private func refreshVisibilityNow() {
+        guard SettingsStore.shared.menuBarStashEnabled else { return }
         accessibilityGranted = AXIsProcessTrusted()
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
         let userHidden = userHiddenBundleIDs
@@ -825,7 +869,9 @@ final class MenuBarIconManager: ObservableObject {
 
     /// 只恢复用户明确操作过的图标，避免把单纯被刘海挤出的图标误记成用户收纳。
     private func restoreSavedPreferencesIfNeeded() {
-        guard accessibilityGranted, !restoringSavedPreferences else { return }
+        guard SettingsStore.shared.menuBarStashEnabled,
+              accessibilityGranted,
+              !restoringSavedPreferences else { return }
         let savedStashed = savedStashBundleIDs
         let savedVisible = savedVisibleBundleIDs
         pendingSavedPreferenceRestores = allIcons.values
