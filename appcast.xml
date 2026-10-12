@@ -3,70 +3,70 @@
     <channel>
         <title>灵动岛</title>
         <item>
-            <title>1.0.2 M 芯片</title>
-            <pubDate>Thu, 17 Sep 2026 09:37:17 +0800</pubDate>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
+            <title>1.0.3 M 芯片</title>
+            <pubDate>Mon, 12 Oct 2026 11:19:28 +0800</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.2
+            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.3
 
-这个版本把 Windows 版和 Mac 版放到同一个仓库、同一条 GitHub Release 里。已经安装 1.0.1 的 Mac 用户可以直接在应用里检查更新。
+这个版本重点修复菜单栏交互延迟，并完成自定义灵动岛编辑面板与音乐控制链路的收敛。
 
 ## Mac
 
-- 菜单栏图标收纳：把系统菜单栏图标收进灵动岛弹窗，支持拖拽整理
-- 外接屏 / 空间切换时自动校正岛屿位置
-- 启动脚本改用稳定签名身份，避免每次重建都要重新授权辅助功能
-- 设置页、悬停气泡和应用网格的交互修正
+- 修复点击状态栏图标后先触发菜单栏图标搬运、导致弹窗展开变慢的问题
+- 菜单栏图标 AX 枚举移到后台队列，避免阻塞状态栏弹窗
+- 系统隐藏的应用不再被重复执行收纳操作
+- 自定义面板预览固定在顶部，参数区改为布局、收起态、展开态、动画四个 Tab
+- 圆角、顶部偏移等尺寸参数调整后实时重建灵动岛布局
+- 设置页合并重复配置，增加圆角参数与动画试用入口
+- 未打开音乐应用时点击播放，可自动绑定并拉起已安装的播放器
+- 修复音乐控制权限预检阻塞导致播放按钮失效的问题
 
 ## Windows
 
-- 首次公开发布：顶部黑色岛体、应用网格、磁吸放大、浅色名称气泡
-- 设置窗口对齐 macOS 系统设置（侧栏 + 白色分组）
-- 托盘和设置页可检查更新；启动时若有新版本会气泡提示
-- 下载 `Windows-Dynamic-Island-1.0.2.zip`，解压后运行 `DynamicIsland.exe`
+- Windows 版本同步更新到 1.0.3
 
 ## 说明
 
-- Mac 安装包：`Mac-Dynamic-Island-1.0.2.pkg` / `Mac-Dynamic-Island-1.0.2-intel.pkg`
-- Windows 压缩包：`Windows-Dynamic-Island-1.0.2.zip`（自包含 exe，无需安装 .NET）
-- 1.0.1 的 Mac 用户走 Sparkle 应用内更新；Windows 用户走 GitHub Release 检查更新
+- Mac 安装包：`Mac-Dynamic-Island-1.0.3.pkg` / `Mac-Dynamic-Island-1.0.3-intel.pkg`
+- Windows 压缩包：`Windows-Dynamic-Island-1.0.3.zip`
 ]]></description>
-            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.2/Mac-Dynamic-Island-1.0.2.pkg" sparkle:edSignature="+toQVIISxH1TOXa0eiqgTPFtq0D/qMqxX/pii90ozumNKsPT/Tv7+Gw/6grcP74uQUQkA9g2xVj5HAU/m6pEBw==" length="1637310" type="application/octet-stream"/>
+            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.3/Mac-Dynamic-Island-1.0.3.pkg" sparkle:edSignature="oPDf5q1yPd9e9Ai3GRYUEwVndY+itVHzhdbJUDYQwefrYC7u5Uo3VpCIwSt9RhiwI19WybygcF5WuIHHLSPQCw==" length="1939636" type="application/octet-stream"/>
         </item>
         <item>
-            <title>1.0.2 intel</title>
-            <pubDate>Thu, 17 Sep 2026 09:37:17 +0800</pubDate>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
+            <title>1.0.3 intel</title>
+            <pubDate>Mon, 12 Oct 2026 11:19:28 +0800</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>x86_64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.2
+            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.3
 
-这个版本把 Windows 版和 Mac 版放到同一个仓库、同一条 GitHub Release 里。已经安装 1.0.1 的 Mac 用户可以直接在应用里检查更新。
+这个版本重点修复菜单栏交互延迟，并完成自定义灵动岛编辑面板与音乐控制链路的收敛。
 
 ## Mac
 
-- 菜单栏图标收纳：把系统菜单栏图标收进灵动岛弹窗，支持拖拽整理
-- 外接屏 / 空间切换时自动校正岛屿位置
-- 启动脚本改用稳定签名身份，避免每次重建都要重新授权辅助功能
-- 设置页、悬停气泡和应用网格的交互修正
+- 修复点击状态栏图标后先触发菜单栏图标搬运、导致弹窗展开变慢的问题
+- 菜单栏图标 AX 枚举移到后台队列，避免阻塞状态栏弹窗
+- 系统隐藏的应用不再被重复执行收纳操作
+- 自定义面板预览固定在顶部，参数区改为布局、收起态、展开态、动画四个 Tab
+- 圆角、顶部偏移等尺寸参数调整后实时重建灵动岛布局
+- 设置页合并重复配置，增加圆角参数与动画试用入口
+- 未打开音乐应用时点击播放，可自动绑定并拉起已安装的播放器
+- 修复音乐控制权限预检阻塞导致播放按钮失效的问题
 
 ## Windows
 
-- 首次公开发布：顶部黑色岛体、应用网格、磁吸放大、浅色名称气泡
-- 设置窗口对齐 macOS 系统设置（侧栏 + 白色分组）
-- 托盘和设置页可检查更新；启动时若有新版本会气泡提示
-- 下载 `Windows-Dynamic-Island-1.0.2.zip`，解压后运行 `DynamicIsland.exe`
+- Windows 版本同步更新到 1.0.3
 
 ## 说明
 
-- Mac 安装包：`Mac-Dynamic-Island-1.0.2.pkg` / `Mac-Dynamic-Island-1.0.2-intel.pkg`
-- Windows 压缩包：`Windows-Dynamic-Island-1.0.2.zip`（自包含 exe，无需安装 .NET）
-- 1.0.1 的 Mac 用户走 Sparkle 应用内更新；Windows 用户走 GitHub Release 检查更新
+- Mac 安装包：`Mac-Dynamic-Island-1.0.3.pkg` / `Mac-Dynamic-Island-1.0.3-intel.pkg`
+- Windows 压缩包：`Windows-Dynamic-Island-1.0.3.zip`
 ]]></description>
-            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.2/Mac-Dynamic-Island-1.0.2-intel.pkg" sparkle:edSignature="a3HZAIIjoRUXFHibUIaHv5vDIVcRhceBC5x4bknj/9t9D8pyuuhNPb/1lvMgE4++8XXHrKsZBao8SUu3jxk/Ag==" length="1657110" type="application/octet-stream"/>
+            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.3/Mac-Dynamic-Island-1.0.3-intel.pkg" sparkle:edSignature="w2mikfcSYBcC4tZatISzeWvuP6Nf9EDP2atp5OaYuzTSoOSEI6E7icLC+2smZPHJHA8kmsvebRndgkfOfRfOCg==" length="1968676" type="application/octet-stream"/>
         </item>
     </channel>
 </rss>
