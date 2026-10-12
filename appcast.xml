@@ -3,70 +3,64 @@
     <channel>
         <title>灵动岛</title>
         <item>
-            <title>1.0.3 M 芯片</title>
-            <pubDate>Mon, 12 Oct 2026 11:19:28 +0800</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
+            <title>1.0.4 M 芯片</title>
+            <pubDate>Mon, 12 Oct 2026 13:49:33 +0800</pubDate>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.3
+            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.4
 
-这个版本重点修复菜单栏交互延迟，并完成自定义灵动岛编辑面板与音乐控制链路的收敛。
+这个版本修复 Sparkle 更新版本号倒退，并增加菜单栏图标收纳开关。
 
 ## Mac
 
-- 修复点击状态栏图标后先触发菜单栏图标搬运、导致弹窗展开变慢的问题
-- 菜单栏图标 AX 枚举移到后台队列，避免阻塞状态栏弹窗
-- 系统隐藏的应用不再被重复执行收纳操作
-- 自定义面板预览固定在顶部，参数区改为布局、收起态、展开态、动画四个 Tab
-- 圆角、顶部偏移等尺寸参数调整后实时重建灵动岛布局
-- 设置页合并重复配置，增加圆角参数与动画试用入口
-- 未打开音乐应用时点击播放，可自动绑定并拉起已安装的播放器
-- 修复音乐控制权限预检阻塞导致播放按钮失效的问题
+- 修复从旧版本更新时 Sparkle 因内部 build 号倒退而判断“没有更新”的问题
+- 新增「菜单栏图标收纳」开关，默认开启
+- 关闭收纳后卸载收纳分隔符，已收纳图标恢复到菜单栏
+- 关闭收纳后停止收纳枚举、整理模式和单图标收纳操作
+- 重新开启后恢复收纳功能和已保存的收纳偏好
 
 ## Windows
 
-- Windows 版本同步更新到 1.0.3
+- Windows 版本同步更新到 1.0.4
 
 ## 说明
 
-- Mac 安装包：`Mac-Dynamic-Island-1.0.3.pkg` / `Mac-Dynamic-Island-1.0.3-intel.pkg`
-- Windows 压缩包：`Windows-Dynamic-Island-1.0.3.zip`
+- Mac 安装包：`Mac-Dynamic-Island-1.0.4.pkg` / `Mac-Dynamic-Island-1.0.4-intel.pkg`
+- Windows 压缩包：`Windows-Dynamic-Island-1.0.4.zip`
 ]]></description>
-            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.3/Mac-Dynamic-Island-1.0.3.pkg" sparkle:edSignature="oPDf5q1yPd9e9Ai3GRYUEwVndY+itVHzhdbJUDYQwefrYC7u5Uo3VpCIwSt9RhiwI19WybygcF5WuIHHLSPQCw==" length="1939636" type="application/octet-stream"/>
+            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.4/Mac-Dynamic-Island-1.0.4.pkg" sparkle:edSignature="Qpj2En7ccJZ/woRfKTYI9bb9HBlD7hcNU/3/s5oMVSgbcXwWBmtQausbDKncYByUn5czzLFMOMbTkWGZpIPHCg==" length="1941443" type="application/octet-stream"/>
         </item>
         <item>
-            <title>1.0.3 intel</title>
-            <pubDate>Mon, 12 Oct 2026 11:19:28 +0800</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
+            <title>1.0.4 intel</title>
+            <pubDate>Mon, 12 Oct 2026 13:49:33 +0800</pubDate>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>x86_64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.3
+            <description sparkle:format="markdown"><![CDATA[# 灵动岛 1.0.4
 
-这个版本重点修复菜单栏交互延迟，并完成自定义灵动岛编辑面板与音乐控制链路的收敛。
+这个版本修复 Sparkle 更新版本号倒退，并增加菜单栏图标收纳开关。
 
 ## Mac
 
-- 修复点击状态栏图标后先触发菜单栏图标搬运、导致弹窗展开变慢的问题
-- 菜单栏图标 AX 枚举移到后台队列，避免阻塞状态栏弹窗
-- 系统隐藏的应用不再被重复执行收纳操作
-- 自定义面板预览固定在顶部，参数区改为布局、收起态、展开态、动画四个 Tab
-- 圆角、顶部偏移等尺寸参数调整后实时重建灵动岛布局
-- 设置页合并重复配置，增加圆角参数与动画试用入口
-- 未打开音乐应用时点击播放，可自动绑定并拉起已安装的播放器
-- 修复音乐控制权限预检阻塞导致播放按钮失效的问题
+- 修复从旧版本更新时 Sparkle 因内部 build 号倒退而判断“没有更新”的问题
+- 新增「菜单栏图标收纳」开关，默认开启
+- 关闭收纳后卸载收纳分隔符，已收纳图标恢复到菜单栏
+- 关闭收纳后停止收纳枚举、整理模式和单图标收纳操作
+- 重新开启后恢复收纳功能和已保存的收纳偏好
 
 ## Windows
 
-- Windows 版本同步更新到 1.0.3
+- Windows 版本同步更新到 1.0.4
 
 ## 说明
 
-- Mac 安装包：`Mac-Dynamic-Island-1.0.3.pkg` / `Mac-Dynamic-Island-1.0.3-intel.pkg`
-- Windows 压缩包：`Windows-Dynamic-Island-1.0.3.zip`
+- Mac 安装包：`Mac-Dynamic-Island-1.0.4.pkg` / `Mac-Dynamic-Island-1.0.4-intel.pkg`
+- Windows 压缩包：`Windows-Dynamic-Island-1.0.4.zip`
 ]]></description>
-            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.3/Mac-Dynamic-Island-1.0.3-intel.pkg" sparkle:edSignature="w2mikfcSYBcC4tZatISzeWvuP6Nf9EDP2atp5OaYuzTSoOSEI6E7icLC+2smZPHJHA8kmsvebRndgkfOfRfOCg==" length="1968676" type="application/octet-stream"/>
+            <enclosure url="https://github.com/weizhiyan/Mac-dynamic-island/releases/download/v1.0.4/Mac-Dynamic-Island-1.0.4-intel.pkg" sparkle:edSignature="IxNsx+uQL9Bk6nadqUNf+thZHsjWgezoShoXl+ho+gix2lIEaSgwrsdBu52s77sQV+ey/Jf7CgSdQhKqdMHVCA==" length="1972843" type="application/octet-stream"/>
         </item>
     </channel>
 </rss>
