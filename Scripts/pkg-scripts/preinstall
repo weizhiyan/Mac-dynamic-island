@@ -1,0 +1,6 @@
+#!/bin/zsh
+
+# Stop the running copy before pkg replaces its bundle on disk. The app also
+# enforces this invariant on launch, covering Finder and LaunchServices starts.
+/usr/bin/pkill -x DynamicIsland 2>/dev/null || true
+exit 0

@@ -5,8 +5,8 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT_DIR/Build"
 APP_PRODUCT="DynamicIsland"
 APP_DISPLAY_NAME="灵动岛"
-APP_VERSION="${APP_VERSION:-1.0.2}"
-APP_BUILD="${APP_BUILD:-3}"
+APP_VERSION="${APP_VERSION:-1.0.3}"
+APP_BUILD="${APP_BUILD:-4}"
 APPCAST_URL="${APPCAST_URL:-https://raw.githubusercontent.com/weizhiyan/Mac-dynamic-island/main/appcast.xml}"
 SPARKLE_PUBLIC_KEY="28WnLNAVZfPjPPkIQIZlni3sSjuwE8kvn3nPAT2X/W8="
 APP_BUNDLE="$BUILD_DIR/$APP_DISPLAY_NAME.app"
@@ -86,6 +86,8 @@ cat > "$PLIST_FILE" <<EOF
   <string>$APP_BUILD</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>灵动岛需要控制你绑定的音乐应用，以显示歌曲和执行播放、暂停及切歌。</string>
   <key>LSUIElement</key>
   <true/>
   <key>SUFeedURL</key>

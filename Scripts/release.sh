@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-VERSION="${VERSION:-1.0.2}"
+VERSION="${VERSION:-1.0.3}"
 TAG="v$VERSION"
 REPO="${REPO:-weizhiyan/Mac-dynamic-island}"
 PKG="Release/Mac-Dynamic-Island-$VERSION.pkg"

@@ -75,6 +75,12 @@ final class MenuBarIconManager: ObservableObject {
 
     private var observers: [NSObjectProtocol] = []
     private var refreshTimer: DispatchSourceTimer?
+    /// 枚举走 40+ 进程的跨进程 AX 往返（实测 150~300ms），必须放后台队列：
+    /// 在主线程跑会拖住点击菜单栏图标后的弹窗弹出。结果回主线程再发布。
+    private let refreshQueue = DispatchQueue(label: "com.zhiyan.dynamicisland.menubar-enum", qos: .userInitiated)
+    private var isEnumerating = false
+    private var lastEnumerationAt = DispatchTime.now()
+
     private var arrangeEndWorkItem: DispatchWorkItem?
     private var restoringSavedPreferences = false
     private var pendingSavedPreferenceRestores: [String] = []
@@ -92,6 +98,10 @@ final class MenuBarIconManager: ObservableObject {
     ]
     private let savedStashBundleIDsKey = "DynamicIsland.MenuBar.StashedBundleIDs"
     private let savedVisibleBundleIDsKey = "DynamicIsland.MenuBar.VisibleBundleIDs"
+    /// 用户手动点名不展示的应用（bundleID -> 应用名）。这类图标在系统里本就不可见，
+    /// 自动分类有时仍把它算成可见（AX frame 停在原位但屏幕不渲染），
+    /// 所以给用户一条手动通道，弹窗里不再出现，直到手动恢复。
+    private let userHiddenBundleIDsKey = "DynamicIsland.MenuBar.UserHiddenBundleIDs"
     /// 整理模式持续时间：留给用户 ⌘ 拖图标，到时自动恢复隐藏
     let arrangeDuration: TimeInterval = 20
 
@@ -111,11 +121,11 @@ final class MenuBarIconManager: ObservableObject {
     // MARK: - 启动 / 停止
 
     func start() {
-        MenuBarSectionHider.shared.installIfNeeded()
+        MenuBarSectionHider.shared.installIfNeeded(collapseInitially: !savedStashBundleIDs.isEmpty)
         setupObservers()
         // 延迟首次枚举，等菜单栏上的其他应用把状态项都建好
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.refreshNow()
+            self?.refresh()
         }
     }
 
@@ -139,15 +149,66 @@ final class MenuBarIconManager: ObservableObject {
     }
     // MARK: - 两个分区
 
-    /// 收纳区：当前被挤出可见菜单栏的图标 —— 我们的分隔符挤的，或刘海挤的。
-    /// 判定完全来自实时 AX，所以应用一退出条目就消失，不需要任何本地名单。
+    /// 收纳区：当前位于我们超长分隔符左侧、确实被灵动岛收纳的图标。
+    /// 菜单栏溢出或刘海遮挡的项目走 recoverableOverflowIcons，不混入这里。
     func stashedIcons() -> [MenuBarIconInfo] {
         sortedByName(allIcons.values.filter { $0.visibility == .hidden })
+    }
+
+    /// 状态项仍停在菜单栏高度，但被系统推到屏幕边界外；这类图标不是我们收纳的，
+    /// 但可以通过同一套移动机制放回分隔符右侧的可见区域。
+    func recoverableOverflowIcons() -> [MenuBarIconInfo] {
+        sortedByName(allIcons.values.filter {
+            $0.visibility == .notDisplayed && isParkedAtMenuBarLevel($0.quartzFrame)
+        })
     }
 
     /// 镜像区：菜单栏上当前可见的图标。点它等于点菜单栏本体，方便统一入口。
     func visibleIcons() -> [MenuBarIconInfo] {
         sortedByName(allIcons.values.filter { $0.visibility == .visible })
+    }
+
+    // MARK: - 手动隐藏：用户点名不展示的应用
+
+    private var userHiddenApps: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: userHiddenBundleIDsKey) as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: userHiddenBundleIDsKey) }
+    }
+
+    private var userHiddenBundleIDs: Set<String> { Set(userHiddenApps.keys) }
+
+    /// 把某个应用从弹窗所有列表里去掉（不拦截它自己的菜单栏行为，只是不再展示）。
+    func hideFromList(bundleID: String) {
+        guard let info = allIcons[bundleID] else { return }
+        var records = userHiddenApps
+        records[bundleID] = info.appName
+        userHiddenApps = records
+        allIcons.removeValue(forKey: bundleID)
+        debugLog("🙈 手动隐藏应用: \(info.appName) (\(bundleID))")
+    }
+
+    /// 恢复展示：重新参与菜单栏枚举。
+    func restoreToList(bundleID: String) {
+        var records = userHiddenApps
+        guard records.removeValue(forKey: bundleID) != nil else { return }
+        userHiddenApps = records
+        debugLog("👀 恢复展示应用: \(bundleID)")
+        refresh()
+    }
+
+    /// 手动隐藏清单，供弹窗「手动隐藏」区展示（图标现场从应用包取，不缓存）。
+    func userHiddenEntries() -> [MenuBarIconInfo] {
+        let now = userHiddenApps
+        return now.map { bundleID, appName in
+            MenuBarIconInfo(
+                bundleID: bundleID,
+                appName: appName,
+                icon: appIcon(for: bundleID, name: appName),
+                axElement: nil,
+                quartzFrame: .zero,
+                visibility: .notDisplayed
+            )
+        }.sorted { $0.appName.localizedStandardCompare($1.appName) == .orderedAscending }
     }
 
     private func sortedByName(_ icons: [MenuBarIconInfo]) -> [MenuBarIconInfo] {
@@ -162,7 +223,7 @@ final class MenuBarIconManager: ObservableObject {
         arrangeEndWorkItem?.cancel()
         MenuBarSectionHider.shared.expand()
         isArranging = true
-        after(0.3) { self.refreshNow() }
+        after(0.3) { self.refresh() }
         let work = DispatchWorkItem { [weak self] in self?.endArrange() }
         arrangeEndWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + arrangeDuration, execute: work)
@@ -171,10 +232,10 @@ final class MenuBarIconManager: ObservableObject {
     func endArrange() {
         arrangeEndWorkItem?.cancel()
         arrangeEndWorkItem = nil
-        MenuBarSectionHider.shared.collapse()
+        restoreDividerState()
         isArranging = false
         // 等 macOS 重排完菜单栏再读，否则读到的还是展开时的位置
-        after(0.4) { self.refreshNow() }
+        after(0.4) { self.refresh() }
     }
 
     // MARK: - 角标：收纳 / 恢复单个图标
@@ -233,8 +294,12 @@ final class MenuBarIconManager: ObservableObject {
                     )
                     return
                 }
-                // 已经在目标那一侧就不用折腾了
-                if (initial.item.midX < initial.divider.midX) == toStash {
+                // 收纳时目标侧相同即可跳过；恢复时必须确认它已经真正落在可见菜单栏，
+                // 屏幕外的溢出图标仍需要尝试拖回可见区域。
+                let alreadyAtTarget = toStash
+                    ? initial.item.midX < initial.divider.midX
+                    : info.visibility == .visible
+                if alreadyAtTarget {
                     self.finishMoveOnMain(
                         wasArranging: wasArranging, bundleID: bundleID, toStash: toStash,
                         message: nil
@@ -321,8 +386,14 @@ final class MenuBarIconManager: ObservableObject {
             if let item = rawFrame(of: element), item.width >= 4,
                let divider = MenuBarSectionHider.shared.dividerAXFrame(), divider.width > 0,
                abs(item.midY - divider.midY) <= 12,
-               displays.contains(where: { $0.minX <= item.midX && item.midX <= $0.maxX
-                                       && $0.minX <= divider.midX && divider.midX <= $0.maxX }) {
+               let dividerDisplay = displays.first(where: {
+                   $0.minX <= divider.midX && divider.midX <= $0.maxX
+                       && $0.minY <= divider.midY && divider.midY <= $0.maxY
+               }),
+               (dividerDisplay.contains(CGPoint(x: item.midX, y: item.midY))
+                   || !displays.contains(where: {
+                       $0.contains(CGPoint(x: item.midX, y: item.midY))
+                   })) {
                 return (item, divider)
             }
             usleep(120_000)
@@ -358,7 +429,9 @@ final class MenuBarIconManager: ObservableObject {
         if message == nil {
             saveUserPreference(for: bundleID, stashed: toStash)
         }
-        if !wasArranging { MenuBarSectionHider.shared.collapse() }
+        if !wasArranging {
+            restoreDividerState()
+        }
         after(0.4) {
             self.refreshVisibilityNow()
             // 重新枚举完再把弹窗弹回来，用户一眼看到图标已经换栏
@@ -398,7 +471,7 @@ final class MenuBarIconManager: ObservableObject {
             // 菜单已经弹成独立窗口，不受分隔符影响，稍后恢复隐藏
             self.after(2.0) {
                 self.pressingBundleID = nil
-                if !wasArranging { MenuBarSectionHider.shared.collapse() }
+                if !wasArranging { self.restoreDividerState() }
                 self.after(0.4) { self.refreshVisibilityNow() }
             }
         }
@@ -431,25 +504,40 @@ final class MenuBarIconManager: ObservableObject {
     }
     // MARK: - 刷新
 
-    /// 弹窗打开、屏幕变化等场景调用：全量枚举一次。
+    /// 弹窗打开、屏幕变化等场景调用：全量枚举一次（后台跑，不卡界面）。
     func refresh() {
-        DispatchQueue.main.async { [weak self] in self?.refreshNow() }
+        guard !shouldThrottleRefresh else { return }
+        refreshQueue.async { [weak self] in self?.refreshNow() }
     }
 
-    /// 全量枚举：遍历运行中的应用重建图标库。
+    /// 距离上次枚举不足 1 秒就跳过：弹窗反复开合和轮询足够近，没必要重复扫一遍进程。
+    private var shouldThrottleRefresh: Bool {
+        DispatchTime.now().uptimeNanoseconds - lastEnumerationAt.uptimeNanoseconds < 1_000_000_000
+    }
+
+    /// 全量枚举：遍历运行中的应用重建图标库。AX 读取在后台队列，发布回主线程。
     private func refreshNow() {
-        accessibilityGranted = AXIsProcessTrusted()
+        guard !isEnumerating else { return }
+        isEnumerating = true
+        defer { isEnumerating = false }
+        let granted = AXIsProcessTrusted()
         let enumerated = enumerateMenuBarIconsViaAX()
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        // AX 只返回当前活跃屏幕上那一份状态项副本，双屏切换时结果可能短暂缺失。
-        // 因此按 bundleID 合并，只清理已退出的应用。
-        var merged = allIcons.filter { running.contains($0.key) }
-        for (bundleID, info) in enumerated {
-            merged[bundleID] = carryOverIfUnknown(new: info, old: merged[bundleID])
+        let userHidden = userHiddenBundleIDs
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lastEnumerationAt = .now()
+            self.accessibilityGranted = granted
+            // AX 只返回当前活跃屏幕上那一份状态项副本，双屏切换时结果可能短暂缺失。
+            // 因此按 bundleID 合并，只清理已退出的应用。
+            var merged = self.allIcons.filter { running.contains($0.key) && !userHidden.contains($0.key) }
+            for (bundleID, info) in enumerated where !userHidden.contains(bundleID) {
+                merged[bundleID] = self.carryOverIfUnknown(new: info, old: merged[bundleID])
+            }
+            self.allIcons = merged
+            self.logSummary(enumerated: enumerated.count)
+            self.restoreSavedPreferencesIfNeeded()
         }
-        allIcons = merged
-        logSummary(enumerated: enumerated.count)
-        restoreSavedPreferencesIfNeeded()
     }
 
     /// 轻量刷新：只重探已知元素的可见性，不遍历全部进程。
@@ -457,8 +545,10 @@ final class MenuBarIconManager: ObservableObject {
     private func refreshVisibilityNow() {
         accessibilityGranted = AXIsProcessTrusted()
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let userHidden = userHiddenBundleIDs
         var merged: [String: MenuBarIconInfo] = [:]
-        for (bundleID, info) in allIcons where running.contains(bundleID) {
+        for (bundleID, info) in allIcons
+        where running.contains(bundleID) && !userHidden.contains(bundleID) {
             guard let element = info.axElement, let probe = probeFrame(of: element) else {
                 merged[bundleID] = info
                 continue
@@ -585,11 +675,40 @@ final class MenuBarIconManager: ObservableObject {
     private func classify(_ frame: CGRect) -> MenuBarIconVisibility {
         guard frame.width >= 4, frame.width <= 200,
               frame.height >= 8, frame.height <= 60 else { return .notDisplayed }
+        // 被整体抬到菜单栏上方的图标不在菜单栏上（实测系统隐藏的微信停在 y = -1，
+        // 屏幕上什么都不渲染），也不是我们收纳的 —— 两栏都不该出现。
+        if isLiftedOffMenuBar(frame) { return .notDisplayed }
         if isInVisibleMenuBar(frame) { return .visible }
-        // 还停在菜单栏那一条高度上（或更高）→ 是被挤出去的，能靠收起分隔符请回来
-        if isParkedAtMenuBarLevel(frame) { return .hidden }
-        // 其余（典型是停在主屏底部之外）→ 应用自己没把它放上菜单栏，两栏都不显示
+        // 只有位于超长分隔符左侧的图标才是我们明确收纳的项目。
+        // 菜单栏右侧因空间不足而落到屏幕外的项目不能放进“已收纳”，
+        // 否则恢复按钮会把它误判成已经在分隔符右侧，点击后没有任何效果。
+        if isHiddenByOurDivider(frame) { return .hidden }
+        // 其余（包括系统刘海、菜单栏溢出、应用自己未上栏）都不属于收纳区。
         return .notDisplayed
+    }
+
+    /// 状态项被抬到所有屏幕的菜单栏上方：系统隐藏签名（收纳分隔符左侧的
+    /// 自己人仍贴在条高上，不会抬走）。
+    private func isLiftedOffMenuBar(_ frame: CGRect) -> Bool {
+        NSScreen.screens.allSatisfy { screen in
+            frame.minY < quartzFrame(for: screen).minY
+        }
+    }
+
+    private func isHiddenByOurDivider(_ frame: CGRect) -> Bool {
+        guard let divider = MenuBarSectionHider.shared.dividerAXFrame(),
+              divider.width > 200,
+              abs(frame.midY - divider.midY) <= 14 else { return false }
+        // 收纳边界的右缘是隐藏区与可见区的分界；分隔符左侧的项目才是已收纳。
+        return frame.midX < divider.maxX
+    }
+
+    private func isParkedAtMenuBarLevel(_ frame: CGRect) -> Bool {
+        let tops = NSScreen.screens.map { quartzFrame(for: $0).minY }
+        let band = NSStatusBar.system.thickness + 12
+        // 只有还贴在菜单栏高度上（被横向挤出屏幕）的才可恢复；
+        // 被整体抬到菜单栏上方的（y < 屏幕顶）是系统隐藏签名，拖不回来。
+        return tops.contains { $0 <= frame.minY && abs(frame.minY - $0) <= band }
     }
 
     /// 被 macOS 挤出可见区的状态项会被停到菜单栏之外（实测 y = -1437，
@@ -600,20 +719,10 @@ final class MenuBarIconManager: ObservableObject {
             CGPoint(x: frame.midX, y: frame.midY)
         ) else { return false }
         let screenTop = quartzFrame(for: screen).minY
-        return frame.minY >= screenTop - 2
+        // minY 小于屏幕顶 = 已被抬到菜单栏上方（实测系统隐藏的微信停在 y = -1，
+        // 屏幕上什么都不渲染，可见项则在 y = 3 / 7.5），不算可见。
+        return frame.minY >= screenTop
             && frame.maxY <= screenTop + NSStatusBar.system.thickness + 12
-    }
-
-    /// 被挤出可见区的状态项仍停在「菜单栏高度」上，只是横向被推到屏幕外
-    /// （实测 x = -3902, y = 7），也见过整条被抬到所有屏幕上方（y = -1437）。
-    /// 这两种都能靠收起分隔符请回来，所以算作已收纳；
-    /// 停在主屏底部之外的那种（Figma）不算，它压根没上过菜单栏。
-    private func isParkedAtMenuBarLevel(_ frame: CGRect) -> Bool {
-        let tops = NSScreen.screens.map { quartzFrame(for: $0).minY }
-        guard let highest = tops.min() else { return false }
-        let band = NSStatusBar.system.thickness + 12
-        if frame.maxY <= highest + band { return true }
-        return tops.contains { abs(frame.minY - $0) <= band }
     }
 
     private func screenContainingQuartzPoint(_ point: CGPoint) -> NSScreen? {
@@ -631,7 +740,7 @@ final class MenuBarIconManager: ObservableObject {
         )
     }
 
-    private func appIcon(for bundleID: String, name: String) -> NSImage {
+    func appIcon(for bundleID: String, name: String) -> NSImage {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             return NSWorkspace.shared.icon(forFile: url.path)
         }
@@ -647,27 +756,27 @@ final class MenuBarIconManager: ObservableObject {
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.refreshNow()
+            self?.refresh()
         })
 
         // 应用启动/退出：状态项跟着增减，全量枚举一次
         observers.append(workspace.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.after(1.0) { self?.refreshNow() }
+            self?.after(1.0) { self?.refresh() }
         })
 
         observers.append(workspace.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.after(0.5) { self?.refreshNow() }
+            self?.after(0.5) { self?.refresh() }
         })
 
         // 睡眠唤醒后，macOS 可能重新计算状态栏位置；重新读取并校正用户明确保存过的意图。
         observers.append(workspace.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.after(1.2) { self?.refreshNow() }
+            self?.after(1.2) { self?.refresh() }
         })
 
         // 兜底轮询：只重探已知元素，代价很小
@@ -686,6 +795,16 @@ final class MenuBarIconManager: ObservableObject {
 
     private var savedVisibleBundleIDs: Set<String> {
         Set(UserDefaults.standard.stringArray(forKey: savedVisibleBundleIDsKey) ?? [])
+    }
+
+    /// 超长分隔符只在至少存在一个明确收纳项时启用。
+    /// 没有收纳项时保持窄边界，避免菜单栏图标被无意挤出。
+    private func restoreDividerState() {
+        if savedStashBundleIDs.isEmpty {
+            MenuBarSectionHider.shared.expand()
+        } else {
+            MenuBarSectionHider.shared.collapse()
+        }
     }
 
     private func saveUserPreference(for bundleID: String, stashed: Bool) {
@@ -712,7 +831,13 @@ final class MenuBarIconManager: ObservableObject {
         pendingSavedPreferenceRestores = allIcons.values
             .filter { info in
                 guard info.visibility != .unknown else { return false }
-                if savedStashed.contains(info.bundleID) { return info.visibility != .hidden }
+                if savedStashed.contains(info.bundleID) {
+                    // 只有「正显示在菜单栏上」的才需要搬去收纳：被系统隐藏的图标
+                    // （停在菜单栏上方 y=-1，屏幕不渲染）或自己没上栏的，macOS
+                    // 根本不画它们，搬不动也不必搬——否则每次刷新都会展开分隔符
+                    // 再空搬一次，菜单栏白白位移。
+                    return info.visibility == .visible
+                }
                 if savedVisible.contains(info.bundleID) { return info.visibility == .hidden }
                 return false
             }
@@ -750,13 +875,17 @@ final class MenuBarIconManager: ObservableObject {
             + "/\(Int($0.quartzFrame.width))x\(Int($0.quartzFrame.height))"
         }.joined(separator: ", ")
         let visible = visibleIcons().map(\.bundleID).joined(separator: ", ")
-        let idle = allIcons.values.filter { $0.visibility == .notDisplayed }
+        let overflow = recoverableOverflowIcons().map(\.bundleID).joined(separator: ", ")
+        let idle = allIcons.values.filter {
+            $0.visibility == .notDisplayed && !isParkedAtMenuBarLevel($0.quartzFrame)
+        }
             .map(\.bundleID).joined(separator: ", ")
         debugLog(
             "🔍 菜单栏图标: 本次枚举\(enumerated)个 库内\(allIcons.count)个 "
             + "| axTrusted=\(accessibilityGranted) 整理中=\(isArranging) "
             + "| 已收纳(\(stashedIcons().count)): \(stashed) | 可见(\(visibleIcons().count)): \(visible) "
-            + "| 未上栏: \(idle.isEmpty ? "无" : idle)"
+            + "| 菜单栏外可恢复: \(overflow.isEmpty ? "无" : overflow)"
+            + " | 未上栏: \(idle.isEmpty ? "无" : idle)"
         )
     }
 

@@ -28,7 +28,7 @@ final class MenuBarSectionHider {
 
     // MARK: - 生命周期
 
-    func installIfNeeded() {
+    func installIfNeeded(collapseInitially: Bool = false) {
         guard dividerItem == nil else { return }
         migratePreferredPositionIfNeeded()
         let item = NSStatusBar.system.statusItem(withLength: mutationLength)
@@ -39,8 +39,12 @@ final class MenuBarSectionHider {
         // 打上 AX 标识：自己名下有两个状态项（主控图标 + 这条分隔符），
         // 从 AX 里读位置时要靠它认出哪个是分隔符。
         item.button?.setAccessibilityIdentifier(Self.axIdentifier)
-        // 静息态就是隐藏态：用户拖到左边的图标应当一直收着
-        collapse()
+        // 没有明确的收纳意图时保持窄分隔符，避免启动应用凭空挤出菜单栏图标。
+        if collapseInitially {
+            collapse()
+        } else {
+            expand()
+        }
     }
 
     /// 卸载分隔符（退出时调用），被收纳的图标恢复显示

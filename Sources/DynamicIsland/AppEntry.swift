@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var detectorWindow: HoverDetectorWindowController?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var customizeWindow: NSWindow?
     private var screenObservers: [NSObjectProtocol] = []
     private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
@@ -49,11 +50,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MenuBarIconManager.shared.stop()
     }
 
+    /// 自定义面板顶部与屏幕顶端的最小间距（pt），给展开态灵动岛留位置。
+    private static let customizeWindowTopMargin: CGFloat = 220
+
     func applicationWillTerminate(_ notification: Notification) {
         MenuBarIconManager.shared.stop()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard enforceSingleInstance() else { return }
         Self.shared = self
         print("DynamicIsland: didFinishLaunching")
         NSApp.setActivationPolicy(.accessory)
@@ -93,8 +98,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+
         // 实测新的「零指针位移」移动方案，只在设了环境变量时跑（见 MenuBarProProbe）。
         MenuBarProProbe.runIfRequested()
+    }
+
+    /// 安装包覆盖旧版本后，用户可能会从 Finder 再次打开应用。
+    /// 同一 bundle ID 只允许一个进程持有菜单栏和灵动岛窗口。
+    private func enforceSingleInstance() -> Bool {
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.zhiyan.dynamicisland"
+        let existing = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .first { $0.processIdentifier != currentPID }
+        guard let existing else { return true }
+
+        existing.activate()
+        NSApp.terminate(nil)
+        return false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -193,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showMenuBarPopover() {
-        // 打开弹窗前刷新一次菜单栏图标枚举与快照，保证候选列表最新
+        // 刷新走后台队列（见 MenuBarIconManager.refresh），不会拖住弹窗弹出
         MenuBarIconManager.shared.refresh()
         let pop = NSPopover()
         pop.behavior = .transient       // 点击外部自动关闭
@@ -213,10 +233,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onSettings: { [weak self] in
                 self?.closeMenuBarPopover()
                 self?.openSettings()
-            },
-            onCheckUpdates: { [weak self] in
-                self?.closeMenuBarPopover()
-                self?.checkForUpdates()
             },
             onQuit: { [weak self] in
                 self?.closeMenuBarPopover()
@@ -301,6 +317,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func showTriggerAreaPreview() { detectorWindow?.showActivationZonePreview() }
 
+    /// 设置页「试一下」：不吊嗓子等悬停，直接播一遍展开→收起，方便对照动画参数。
+    func testIslandAnimation() { islandWindow?.testExpand() }
+
     @objc func checkForUpdates() {
         updaterController.checkForUpdates(nil)
     }
@@ -308,11 +327,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openSettings() {
         if settingsWindow == nil {
             // 手动创建设置窗口（.accessory 模式下 SwiftUI Settings scene 可能不响应）
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
-                                  styleMask: [.titled, .closable, .miniaturizable],
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 640),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                   backing: .buffered, defer: false)
             window.title = "灵动岛设置"
             window.isReleasedWhenClosed = false
+            window.minSize = NSSize(width: 760, height: 560)
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.styleMask.insert(.fullSizeContentView)
             window.center()
             let host = NSHostingView(rootView: AnyView(
                 SettingsView().environmentObject(SettingsStore.shared)
@@ -326,26 +349,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    func addShortcutAppsFromPanel() {
-        NSApp.activate(ignoringOtherApps: true)
+    // MARK: - 自定义岛屿面板
 
-        let panel = NSOpenPanel()
-        panel.title = "选择应用"
-        panel.prompt = "添加"
-        panel.message = "可以一次选择多个应用"
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowedContentTypes = [.applicationBundle]
-        panel.allowsMultipleSelection = true
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.resolvesAliases = true
-
-        if panel.runModal() == .OK {
-            AppStore.shared.addApps(at: panel.urls)
+    /// 打开「自定义灵动岛」面板：同时强制展开真实岛屿做实时预览。
+    @objc func openCustomizePanel() {
+        closeMenuBarPopover()
+        if customizeWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 700, height: 780),
+                styleMask: [.titled, .closable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "自定义灵动岛"
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            // 跟随所有空间：编辑面板要能和真实灵动岛同屏，全屏应用里也能浮出来
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            let host = NSHostingView(rootView: AnyView(
+                IslandCustomizeView(
+                    onDone: { [weak self] in
+                        self?.closeCustomizePanel()
+                    },
+                    onPreviewModeChanged: { [weak self] expanded in
+                        self?.islandWindow?.setLivePreviewExpanded(expanded)
+                    }
+                )
+                .environmentObject(SettingsStore.shared)
+                .environmentObject(AppStore.shared)
+                .environmentObject(IslandViewModel.shared)
+                .environmentObject(MediaPlayerStore.shared)
+                .environmentObject(SystemMetricsStore.shared)
+            ))
+            window.contentView = host
+            customizeWindow = window
         }
+        positionCustomizeWindow()
+        NSApp.activate(ignoringOtherApps: true)
+        customizeWindow?.makeKeyAndOrderFront(nil)
+        islandWindow?.beginLivePreview()
+    }
+
+    /// 面板落在灵动岛下方：真实岛屿贴在屏幕顶端，两者不能互相遮挡。
+    private func positionCustomizeWindow() {
+        guard let window = customizeWindow, let screen = window.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        let size = window.frame.size
+        let origin = NSPoint(
+            x: visible.midX - size.width / 2,
+            y: max(visible.minY, visible.maxY - Self.customizeWindowTopMargin - size.height)
+        )
+        window.setFrameOrigin(origin)
+    }
+
+    func closeCustomizePanel() {
+        customizeWindow?.close()
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
+}
+
+// MARK: - NSWindowDelegate
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window === customizeWindow else { return }
+        // 面板关闭：解除实时预览锁定，岛屿回到悬停控制
+        islandWindow?.endLivePreview()
+    }
 }
 
 // MARK: - NSPopoverDelegate

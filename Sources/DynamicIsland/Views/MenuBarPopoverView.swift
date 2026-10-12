@@ -9,7 +9,6 @@ struct MenuBarPopoverView: View {
     var isIslandEnabled: Bool
     var onToggleIsland: () -> Void
     var onSettings: () -> Void
-    var onCheckUpdates: () -> Void
     var onQuit: () -> Void
 
     private let columns = 4
@@ -20,6 +19,7 @@ struct MenuBarPopoverView: View {
     private var cellSize: CGFloat { iconSize + 6 }
 
     var body: some View {
+        let overflowIcons = iconManager.recoverableOverflowIcons()
         VStack(spacing: 0) {
             header
             Divider()
@@ -37,10 +37,22 @@ struct MenuBarPopoverView: View {
             }
             grid(iconManager.stashedIcons(), badge: .unstash,
                  emptyHint: "还没有收纳任何图标，点下方图标右上角的 ＋")
+            if !overflowIcons.isEmpty {
+                Divider()
+                overflowHeader
+                grid(overflowIcons, badge: .unstash,
+                     emptyHint: "没有需要恢复的菜单栏外图标")
+            }
             Divider()
             mirrorHeader
             grid(iconManager.visibleIcons(), badge: .stash,
                  emptyHint: "没有检测到菜单栏图标")
+            let userHidden = iconManager.userHiddenEntries()
+            if !userHidden.isEmpty {
+                Divider()
+                userHiddenHeader
+                grid(userHidden, badge: .reveal, emptyHint: "", allowsUserHide: false)
+            }
             Divider()
             actionBar
         }
@@ -89,6 +101,34 @@ struct MenuBarPopoverView: View {
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 0)
             Text("点 ＋ 收纳")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, cellPadding)
+        .padding(.top, 6)
+    }
+
+    private var userHiddenHeader: some View {
+        HStack {
+            Text("手动隐藏")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+            Text("点 👁 恢复展示")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, cellPadding)
+        .padding(.top, 6)
+    }
+
+    private var overflowHeader: some View {
+        HStack {
+            Text("菜单栏外")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+            Text("点 − 放回菜单栏")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
         }
@@ -152,7 +192,8 @@ struct MenuBarPopoverView: View {
     // MARK: - 图标网格
 
     private func grid(
-        _ icons: [MenuBarIconInfo], badge: MenuBarIconBadge, emptyHint: String
+        _ icons: [MenuBarIconInfo], badge: MenuBarIconBadge, emptyHint: String,
+        allowsUserHide: Bool = true
     ) -> some View {
         let rows = max(1, Int(ceil(Double(icons.count) / Double(columns))))
         return VStack(spacing: spacing) {
@@ -176,7 +217,8 @@ struct MenuBarPopoverView: View {
                                     isPressing: iconManager.pressingBundleID == icons[index].bundleID,
                                     isMoving: iconManager.movingBundleID == icons[index].bundleID,
                                     badgeEnabled: iconManager.accessibilityGranted
-                                        && iconManager.movingBundleID == nil
+                                        && iconManager.movingBundleID == nil,
+                                    allowsUserHide: allowsUserHide
                                 )
                             } else {
                                 Color.clear.frame(width: cellSize, height: cellSize)
@@ -199,7 +241,6 @@ struct MenuBarPopoverView: View {
                 onToggleIsland
             )
             actionButton("设置", "gearshape", onSettings)
-            actionButton("更新", "arrow.triangle.2.circlepath", onCheckUpdates)
             actionButton("退出", "power", onQuit)
         }
         .padding(.vertical, 6)
@@ -228,10 +269,30 @@ struct MenuBarPopoverView: View {
 enum MenuBarIconBadge {
     case stash
     case unstash
+    /// 恢复一条被用户手动隐藏的应用
+    case reveal
 
-    var symbol: String { self == .stash ? "plus.circle.fill" : "minus.circle.fill" }
-    var tint: Color { self == .stash ? .accentColor : .red }
-    var hint: String { self == .stash ? "收纳（从菜单栏隐藏）" : "恢复到菜单栏" }
+    var symbol: String {
+        switch self {
+        case .stash: return "plus.circle.fill"
+        case .unstash: return "minus.circle.fill"
+        case .reveal: return "eye"
+        }
+    }
+    var tint: Color {
+        switch self {
+        case .stash: return .accentColor
+        case .unstash: return .red
+        case .reveal: return .green
+        }
+    }
+    var hint: String {
+        switch self {
+        case .stash: return "收纳（从菜单栏隐藏）"
+        case .unstash: return "恢复到菜单栏"
+        case .reveal: return "重新在弹窗里展示"
+        }
+    }
 }
 
 private struct MenuBarIconCell: View {
@@ -242,6 +303,8 @@ private struct MenuBarIconCell: View {
     let isPressing: Bool
     let isMoving: Bool
     let badgeEnabled: Bool
+    /// 镜像区才提供「不显示此应用」：手动隐藏兜住自动分类判错的场景
+    let allowsUserHide: Bool
     @State private var isHovered = false
 
     private var isBusy: Bool { isPressing || isMoving }
@@ -266,6 +329,15 @@ private struct MenuBarIconCell: View {
             .onHover { isHovered = $0 }
             .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isHovered)
             .frame(width: cellSize, height: cellSize, alignment: .bottomLeading)
+            .contextMenu {
+                if allowsUserHide {
+                    Button {
+                        MenuBarIconManager.shared.hideFromList(bundleID: info.bundleID)
+                    } label: {
+                        Label("不显示此应用", systemImage: "eye.slash")
+                    }
+                }
+            }
 
             badgeButton
         }
@@ -278,6 +350,7 @@ private struct MenuBarIconCell: View {
             switch badge {
             case .stash: MenuBarIconManager.shared.stash(bundleID: info.bundleID)
             case .unstash: MenuBarIconManager.shared.unstash(bundleID: info.bundleID)
+            case .reveal: MenuBarIconManager.shared.restoreToList(bundleID: info.bundleID)
             }
         } label: {
             Image(systemName: badge.symbol)

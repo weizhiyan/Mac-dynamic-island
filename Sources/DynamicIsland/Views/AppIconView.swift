@@ -6,6 +6,8 @@ struct AppIconView: View {
     let size: CGFloat
     var reveal: Bool
     var magnification: CGFloat = 1
+    var isDragging = false
+    var onTap: () -> Void = {}
 
     var body: some View {
         Image(nsImage: IconLoader.icon(for: item))
@@ -14,20 +16,19 @@ struct AppIconView: View {
             .scaledToFit()
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
-            .scaleEffect(magnification, anchor: .center)
-            .shadow(color: .black.opacity(0.30), radius: 8, y: 4)
+            .scaleEffect(isDragging ? 1.06 : magnification, anchor: .center)
+            .shadow(color: .black.opacity(0.30), radius: isDragging ? 11 : 8, y: 4)
             .opacity(reveal ? 1 : 0)
             .offset(y: reveal ? 0 : 12)
             .animation(.islandReveal, value: reveal)
             .animation(.spring(response: 0.18, dampingFraction: 0.82), value: magnification)
-            .onTapGesture {
-                ClickProbe.log("onTapGesture \(item.name)")
-                AppLauncher.launch(item)
-            }
+            .animation(.interactiveSpring(response: 0.20, dampingFraction: 0.86), value: isDragging)
+            .onTapGesture(perform: onTap)
             .background(
                 TooltipHostingView(title: item.name)
                     .frame(width: size, height: size)
             )
+            .contentShape(Rectangle())
     }
 }
 

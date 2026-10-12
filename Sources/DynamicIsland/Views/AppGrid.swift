@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct AppGrid: View {
     @EnvironmentObject var appStore: AppStore
@@ -7,44 +6,63 @@ struct AppGrid: View {
     @EnvironmentObject var viewModel: IslandViewModel
     @State private var hoverLocation: CGPoint?
     @State private var draggedApp: AppItem?
+    @State private var lastInsertionKey: String?
+    @State private var dragJustEnded = false
 
     var body: some View {
-        let apps = appStore.visibleApps(for: settings.appFilterMode)
+        let apps = appStore.visibleApps()
         let cols = max(1, settings.columns)
         let rows = Int(ceil(Double(apps.count) / Double(cols)))
         return VStack(spacing: settings.iconSpacing) {
             ForEach(0..<rows, id: \.self) { row in
+                let start = row * cols
+                let end = min(start + cols, apps.count)
+                let rowApps = Array(apps[start..<end])
                 HStack(spacing: settings.iconSpacing) {
-                    ForEach(0..<cols, id: \.self) { column in
-                        let index = row * cols + column
-                        if index < apps.count {
-                            AppIconView(
-                                item: apps[index],
-                                size: settings.iconSize,
-                                reveal: viewModel.isExpanded,
-                                magnification: magnification(row: row, column: column)
-                            )
-                            .zIndex(magnification(row: row, column: column))
-                            .onDrag {
-                                draggedApp = apps[index]
-                                return NSItemProvider(object: apps[index].id.uuidString as NSString)
+                    ForEach(rowApps) { item in
+                        let index = apps.firstIndex(where: { $0.id == item.id }) ?? start
+                        let column = index - start
+                        AppIconView(
+                            item: item,
+                            size: settings.iconSize,
+                            reveal: viewModel.isExpanded,
+                            magnification: magnification(row: row, column: column),
+                            isDragging: draggedApp?.id == item.id,
+                            onTap: {
+                                guard draggedApp == nil, !dragJustEnded else { return }
+                                ClickProbe.log("onTapGesture \(item.name)")
+                                AppLauncher.launch(item)
                             }
-                            .onDrop(
-                                of: [UTType.text],
-                                delegate: AppGridDropDelegate(
-                                    target: apps[index],
-                                    draggedApp: $draggedApp,
-                                    appStore: appStore
-                                )
-                            )
-                        } else {
-                            Color.clear.frame(width: settings.iconSize, height: settings.iconSize)
-                        }
+                        )
+                        .zIndex(draggedApp?.id == item.id ? 100 : magnification(row: row, column: column))
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 8, coordinateSpace: .named("app-grid"))
+                                .onChanged { value in
+                                    if draggedApp == nil {
+                                        draggedApp = item
+                                        lastInsertionKey = nil
+                                        dragJustEnded = false
+                                    }
+                                    guard draggedApp?.id == item.id else { return }
+                                    dragJustEnded = true
+                                    reorderDraggedApp(at: value.location, columns: cols)
+                                }
+                                .onEnded { _ in
+                                    draggedApp = nil
+                                    lastInsertionKey = nil
+                                    DispatchQueue.main.async {
+                                        dragJustEnded = false
+                                    }
+                                }
+                        )
+                    }
+                    ForEach(rowApps.count..<cols, id: \.self) { _ in
+                        Color.clear.frame(width: settings.iconSize, height: settings.iconSize)
                     }
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .coordinateSpace(name: "app-grid")
         .onContinuousHover { phase in
             switch phase {
@@ -75,24 +93,28 @@ struct AppGrid: View {
         let eased = influence * influence * (3 - 2 * influence)
         return 1 + eased * 0.28
     }
-}
 
-private struct AppGridDropDelegate: DropDelegate {
-    let target: AppItem
-    @Binding var draggedApp: AppItem?
-    let appStore: AppStore
+    private func reorderDraggedApp(at location: CGPoint, columns: Int) {
+        guard let draggedApp else { return }
+        let apps = appStore.visibleApps()
+        guard apps.count > 1 else { return }
 
-    func dropEntered(info: DropInfo) {
-        guard let draggedApp, draggedApp.id != target.id else { return }
-        appStore.moveApp(draggedApp, before: target)
-    }
+        let pitch = settings.iconSize + settings.iconSpacing
+        guard pitch > 0 else { return }
+        let row = max(0, Int(floor(location.y / pitch)))
+        let column = max(0, Int(floor(location.x / pitch)))
+        let targetIndex = min(row * columns + column, apps.count - 1)
+        let target = apps[targetIndex]
+        guard target.id != draggedApp.id else { return }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
+        let localX = location.x - CGFloat(column) * pitch
+        let insertAfter = localX > settings.iconSize / 2
+        let insertionKey = "\(target.id.uuidString)-\(insertAfter)"
+        guard lastInsertionKey != insertionKey else { return }
+        lastInsertionKey = insertionKey
 
-    func performDrop(info: DropInfo) -> Bool {
-        draggedApp = nil
-        return true
+        withAnimation(.interactiveSpring(response: 0.20, dampingFraction: 0.86)) {
+            appStore.moveApp(draggedApp, relativeTo: target, after: insertAfter)
+        }
     }
 }

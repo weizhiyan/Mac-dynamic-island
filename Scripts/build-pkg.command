@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${VERSION:-1.0.2}"
+VERSION="${VERSION:-1.0.3}"
 BUILD_ARCH="${BUILD_ARCH:-}"
 if [[ -z "${ARTIFACT_SUFFIX:-}" && "$BUILD_ARCH" == "x86_64" ]]; then
   ARTIFACT_SUFFIX="-intel"
@@ -12,6 +12,7 @@ fi
 APP_NAME="灵动岛.app"
 PKG_NAME="Mac-Dynamic-Island-$VERSION$ARTIFACT_SUFFIX.pkg"
 PKG_ROOT="/tmp/lingdongdao-pkg-root"
+PKG_SCRIPTS="$ROOT_DIR/Scripts/pkg-scripts"
 
 cd "$ROOT_DIR"
 
@@ -28,6 +29,7 @@ ditto --norsrc --noextattr --noacl --noqtn "$ROOT_DIR/Build/$APP_NAME" "$PKG_ROO
 
 pkgbuild \
   --root "$PKG_ROOT" \
+  --scripts "$PKG_SCRIPTS" \
   --identifier com.zhiyan.dynamicisland.pkg \
   --version "$VERSION" \
   --install-location / \

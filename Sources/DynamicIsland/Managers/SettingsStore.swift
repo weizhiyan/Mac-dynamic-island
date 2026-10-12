@@ -6,30 +6,6 @@ enum IslandMode: String, CaseIterable {
     case systemNotch
 }
 
-enum AppFilterMode: String, CaseIterable, Identifiable {
-    case none
-    case allowlist
-    case denylist
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .none: "不过滤"
-        case .allowlist: "仅显示名单应用"
-        case .denylist: "隐藏名单应用"
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .none: "岛屿会显示快捷应用列表中的所有应用。"
-        case .allowlist: "岛屿只显示过滤名单中的快捷应用。"
-        case .denylist: "岛屿会隐藏过滤名单中的快捷应用。"
-        }
-    }
-}
-
 final class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
     private let defaults = UserDefaults.standard
@@ -132,24 +108,181 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    // MARK: - 收起音乐层校准
+    /// true 时根据真实刘海自动计算紧凑音乐层尺寸；false 时使用下面的手动参数。
+    @Published var compactBandAutoSize: Bool {
+        didSet { defaults.set(compactBandAutoSize, forKey: Key.compactBandAutoSize) }
+    }
+    /// 手动总宽度（pt）。仅在 compactBandAutoSize=false 时生效。
+    @Published var compactBandWidth: CGFloat {
+        didSet { defaults.set(compactBandWidth, forKey: Key.compactBandWidth) }
+    }
+    /// 手动总高度（pt）。仅在 compactBandAutoSize=false 时生效。
+    @Published var compactBandHeight: CGFloat {
+        didSet { defaults.set(compactBandHeight, forKey: Key.compactBandHeight) }
+    }
+    /// 顶部两侧过渡圆角（pt）；0 表示自动值。
+    @Published var compactBandTopRadius: CGFloat {
+        didSet { defaults.set(compactBandTopRadius, forKey: Key.compactBandTopRadius) }
+    }
+    /// 底部两侧圆角（pt）；0 表示自动值。
+    @Published var compactBandBottomRadius: CGFloat {
+        didSet { defaults.set(compactBandBottomRadius, forKey: Key.compactBandBottomRadius) }
+    }
+    /// 收起音乐层垂直偏移（pt），正值向上。
+    @Published var compactBandYOffset: CGFloat {
+        didSet { defaults.set(compactBandYOffset, forKey: Key.compactBandYOffset) }
+    }
+
+    // MARK: - 自定义组件布局
+    /// 展开态顶栏刘海左侧的组件 id 列表（有序）。
+    @Published var topLeftComponents: [String] {
+        didSet { defaults.set(topLeftComponents, forKey: Key.topLeftComponents) }
+    }
+    /// 展开态顶栏刘海右侧的组件 id 列表（有序）。
+    @Published var topRightComponents: [String] {
+        didSet { defaults.set(topRightComponents, forKey: Key.topRightComponents) }
+    }
+    /// 展开态内容区的组件 id 列表（有序，从上到下堆叠）。
+    @Published var bodyComponents: [String] {
+        didSet { defaults.set(bodyComponents, forKey: Key.bodyComponents) }
+    }
+
+    /// 新用户的默认槽位：左侧音乐摘要（绑定了播放器才放）、右侧性能摘要、内容区应用网格。
+    private var defaultTopLeftComponents: [String] {
+        mediaPlayerBundleID == nil ? [] : [IslandComponentRegistry.musicSummaryID]
+    }
+
+    private var defaultTopRightComponents: [String] {
+        [IslandComponentRegistry.metricsSummaryID]
+    }
+
+    private var defaultBodyComponents: [String] {
+        [IslandComponentRegistry.appGridID]
+    }
+
+    func components(in slot: IslandSlot) -> [String] {
+        switch slot {
+        case .topLeft: return topLeftComponents
+        case .topRight: return topRightComponents
+        case .body: return bodyComponents
+        }
+    }
+
+    private func setComponents(_ ids: [String], in slot: IslandSlot) {
+        switch slot {
+        case .topLeft: topLeftComponents = ids
+        case .topRight: topRightComponents = ids
+        case .body: bodyComponents = ids
+        }
+    }
+
+    /// 把组件加入/移动到某个槽位。同一槽位内不允许重复，插入位置越界时贴边。
+    /// - Parameters:
+    ///   - id: 组件 id
+    ///   - source: 来源槽位；nil 表示从组件库新增
+    ///   - destination: 目标槽位
+    ///   - index: 插入位置；nil 表示追加到末尾
+    func moveComponent(id: String, from source: IslandSlot?, to destination: IslandSlot, at index: Int? = nil) {
+        if let source, source != destination {
+            setComponents(components(in: source).filter { $0 != id }, in: source)
+        }
+        let existing = components(in: destination)
+        var insertion = min(max(index ?? existing.count, 0), existing.count)
+        if source == destination,
+           let originalIndex = existing.firstIndex(of: id),
+           originalIndex < insertion {
+            insertion -= 1
+        }
+        var list = existing.filter { $0 != id }
+        insertion = min(max(insertion, 0), list.count)
+        list.insert(id, at: insertion)
+        setComponents(list, in: destination)
+    }
+
+    func removeComponent(id: String, from slot: IslandSlot) {
+        setComponents(components(in: slot).filter { $0 != id }, in: slot)
+    }
+
+    func clearSlot(_ slot: IslandSlot) {
+        setComponents([], in: slot)
+    }
+
+    /// 只恢复组件槽位，不动几何与动画参数。
+    func resetComponentLayout() {
+        topLeftComponents = defaultTopLeftComponents
+        topRightComponents = defaultTopRightComponents
+        bodyComponents = defaultBodyComponents
+    }
+
     /// topBarWidth 始终为 expandedWidth 的 1.5 倍（硬约束，不可单独设置）
     var topBarWidth: CGFloat { expandedWidth * 1.5 }
 
     /// 展开态岛屿宽度 — 根据图标列数、尺寸、间距、内边距自动计算
     var expandedWidth: CGFloat {
         let cols = max(1, columns)
-        return CGFloat(cols) * iconSize + CGFloat(cols - 1) * iconSpacing + contentPadding * 2
+        let gridWidth = CGFloat(cols) * iconSize + CGFloat(cols - 1) * iconSpacing + contentPadding * 2
+        return max(gridWidth, mediaPlayerBundleID == nil ? 0 : 430)
     }
     /// 内容实际顶部间距 — 预留顶部快捷按钮区域，避免小尺寸下与应用图标重叠
     var effectiveContentTopPadding: CGFloat {
         max(contentTopPadding, 34)
     }
-    /// 展开态岛屿高度 — 根据图标行数、尺寸、间距、内边距自动计算
+    /// 展开态岛屿高度 — 根据内容区组件、间距、内边距自动计算
     var expandedHeight: CGFloat {
+        bodyComponentsHeight + effectiveContentTopPadding + contentPadding
+    }
+
+    /// 内容区各组件高度合计（应用网格按实际行列数动态计算，组件间固定 10pt 间距）。
+    var bodyComponentsHeight: CGFloat {
+        var total: CGFloat = 0
+        for (index, id) in bodyComponents.enumerated() {
+            if index > 0 { total += 10 }
+            total += IslandComponentRegistry.bodyHeight(for: id, iconGridHeight: iconGridHeight)
+        }
+        return total
+    }
+
+    /// 应用网格本身的高度，不包含上下内边距和音乐卡片。
+    var iconGridHeight: CGFloat {
         let cols = max(1, columns)
-        let visibleCount = AppStore.shared.visibleApps(for: appFilterMode).count
+        let visibleCount = AppStore.shared.visibleApps().count
         let rows = max(1, Int(ceil(Double(visibleCount) / Double(cols))))
-        return CGFloat(rows) * iconSize + CGFloat(rows - 1) * iconSpacing + effectiveContentTopPadding + contentPadding
+        return CGFloat(rows) * iconSize + CGFloat(rows - 1) * iconSpacing
+    }
+
+    /// 仅恢复外观与布局参数，不影响快捷应用、开机启动或触发延迟。
+    func restoreLayoutDefaults() {
+        iconSize = 60
+        columns = 6
+        iconSpacing = 13
+        contentPadding = 16
+        contentTopPadding = 36
+        bottomPadding = 16
+        compactWidth = 140
+        compactHeight = 1
+        gooeyBlurRadius = 16
+        compactBandAutoSize = true
+        compactBandWidth = 300
+        compactBandHeight = 38
+        compactBandTopRadius = 0
+        compactBandBottomRadius = 0
+        compactBandYOffset = 0
+        topBarHeight = 40
+        topBarYOffset = 38
+        compactCornerRadius = 2
+        expandedCornerRadius = 16
+        bulgeCornerRadius = 23
+    }
+
+    func restoreAnimationDefaults() {
+        expandDuration = 0.5
+        collapseDuration = 0.7
+        revealDelay = 0.31
+        contentFadeInDuration = 0.35
+        contentFadeOutDuration = 0.08
+        expandTimingCurve = "0.65, 0, 0.35, 1"
+        collapseTimingCurve = "0.25, 0.1, 0.25, 1"
     }
 
     // MARK: - 动画
@@ -205,7 +338,7 @@ final class SettingsStore: ObservableObject {
     /// 解析 "x1, y1, x2, y2" 格式字符串为 4 个 Float，失败则用 fallback
     private func timingFunction(from str: String, fallback: (Float, Float, Float, Float)) -> CAMediaTimingFunction {
         let parts = str.split(separator: ",").compactMap { Float($0.trimmingCharacters(in: .whitespaces)) }
-        if parts.count == 4 {
+        if parts.count == 4, (0...1).contains(parts[0]), (0...1).contains(parts[2]) {
             return CAMediaTimingFunction(controlPoints: parts[0], parts[1], parts[2], parts[3])
         }
         return CAMediaTimingFunction(controlPoints: fallback.0, fallback.1, fallback.2, fallback.3)
@@ -230,12 +363,18 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(mode.rawValue, forKey: Key.mode) }
     }
 
-    // MARK: - 应用过滤
-    @Published var appFilterMode: AppFilterMode {
-        didSet { defaults.set(appFilterMode.rawValue, forKey: Key.appFilterMode) }
+    // MARK: - 系统
+    /// 绑定的播放器 bundle identifier。nil 表示不显示音乐卡片。
+    @Published var mediaPlayerBundleID: String? {
+        didSet {
+            if let mediaPlayerBundleID {
+                defaults.set(mediaPlayerBundleID, forKey: Key.mediaPlayerBundleID)
+            } else {
+                defaults.set("", forKey: Key.mediaPlayerBundleID)
+            }
+        }
     }
 
-    // MARK: - 系统
     @Published var launchAtLoginEnabled: Bool {
         didSet {
             let actualValue = LoginItemManager.setEnabled(launchAtLoginEnabled)
@@ -267,6 +406,12 @@ final class SettingsStore: ObservableObject {
         static let compactHeight = "compactHeight"
         static let topBarHeight = "topBarHeight"
         static let gooeyBlurRadius = "gooeyBlurRadius"
+        static let compactBandAutoSize = "compactBandAutoSize"
+        static let compactBandWidth = "compactBandWidth"
+        static let compactBandHeight = "compactBandHeight"
+        static let compactBandTopRadius = "compactBandTopRadius"
+        static let compactBandBottomRadius = "compactBandBottomRadius"
+        static let compactBandYOffset = "compactBandYOffset"
         // 动画
         static let expandDuration = "expandDuration"
         static let collapseDuration = "collapseDuration"
@@ -283,11 +428,14 @@ final class SettingsStore: ObservableObject {
         static let compactCornerRadius = "compactCornerRadius"
         static let expandedCornerRadius = "expandedCornerRadius"
         static let bulgeCornerRadius = "bulgeCornerRadius"
+        // 自定义组件布局
+        static let topLeftComponents = "topLeftComponents"
+        static let topRightComponents = "topRightComponents"
+        static let bodyComponents = "bodyComponents"
         // 模式
         static let mode = "islandMode"
-        // 应用过滤
-        static let appFilterMode = "appFilterMode"
         // 系统
+        static let mediaPlayerBundleID = "mediaPlayerBundleID"
         static let launchAtLoginEnabled = "launchAtLoginEnabled"
         // 收纳应用（已废弃：收纳成员改为实时 AX 判定，不再落盘。留着 key 只为清理旧值）
         static let pinnedAppBundleIDs = "pinnedAppBundleIDs"
@@ -305,6 +453,7 @@ final class SettingsStore: ObservableObject {
 
     private init() {
         let d = UserDefaults.standard
+        d.removeObject(forKey: "appFilterMode")
 
         // 版本号不匹配（首次安装或升级后）→ 清空所有旧设置，避免旧默认值覆盖新默认值
         if d.integer(forKey: Key.settingsVersion) != Self.currentVersion {
@@ -317,7 +466,7 @@ final class SettingsStore: ObservableObject {
                         Key.contentFadeInDuration, Key.contentFadeOutDuration,
                         Key.expandTimingCurve, Key.collapseTimingCurve,
                         Key.compactCornerRadius, Key.expandedCornerRadius, Key.bulgeCornerRadius,
-                        Key.mode, Key.appFilterMode, Key.launchAtLoginEnabled,
+                        Key.mode, Key.mediaPlayerBundleID, Key.launchAtLoginEnabled,
                         Key.pinnedAppBundleIDs] {
                 d.removeObject(forKey: key)
             }
@@ -344,6 +493,12 @@ final class SettingsStore: ObservableObject {
         compactHeight = d.object(forKey: Key.compactHeight) as? CGFloat ?? 1
         topBarHeight = d.object(forKey: Key.topBarHeight) as? CGFloat ?? 40
         gooeyBlurRadius = d.object(forKey: Key.gooeyBlurRadius) as? Double ?? 16
+        compactBandAutoSize = d.object(forKey: Key.compactBandAutoSize) as? Bool ?? true
+        compactBandWidth = d.object(forKey: Key.compactBandWidth) as? CGFloat ?? 300
+        compactBandHeight = d.object(forKey: Key.compactBandHeight) as? CGFloat ?? 38
+        compactBandTopRadius = d.object(forKey: Key.compactBandTopRadius) as? CGFloat ?? 0
+        compactBandBottomRadius = d.object(forKey: Key.compactBandBottomRadius) as? CGFloat ?? 0
+        compactBandYOffset = d.object(forKey: Key.compactBandYOffset) as? CGFloat ?? 0
         // 动画
         expandDuration = d.object(forKey: Key.expandDuration) as? TimeInterval ?? 0.5
         collapseDuration = d.object(forKey: Key.collapseDuration) as? TimeInterval ?? 0.7
@@ -362,10 +517,21 @@ final class SettingsStore: ObservableObject {
         bulgeCornerRadius = d.object(forKey: Key.bulgeCornerRadius) as? CGFloat ?? 23
         // 模式
         mode = IslandMode(rawValue: d.string(forKey: Key.mode) ?? "") ?? .systemNotch
-        // 应用过滤
-        appFilterMode = AppFilterMode(rawValue: d.string(forKey: Key.appFilterMode) ?? "") ?? .none
         // 系统
+        if let savedPlayer = d.string(forKey: Key.mediaPlayerBundleID) {
+            mediaPlayerBundleID = savedPlayer.isEmpty ? nil : savedPlayer
+        } else {
+            mediaPlayerBundleID = FileManager.default.fileExists(atPath: "/Applications/Spotify.app") ? "com.spotify.client" : nil
+        }
         launchAtLoginEnabled = LoginItemManager.isEnabled
+        // 自定义组件布局：先用空数组占位完成整体初始化，再回填 UserDefaults
+        // （初始化期读取 self 的其他属性会触发「used before being initialized」）
+        topLeftComponents = []
+        topRightComponents = []
+        bodyComponents = []
+        topLeftComponents = d.stringArray(forKey: Key.topLeftComponents) ?? defaultTopLeftComponents
+        topRightComponents = d.stringArray(forKey: Key.topRightComponents) ?? defaultTopRightComponents
+        bodyComponents = d.stringArray(forKey: Key.bodyComponents) ?? defaultBodyComponents
         // 清掉旧版本落盘的收纳名单，现在收纳成员完全来自实时 AX 判定
         d.removeObject(forKey: Key.pinnedAppBundleIDs)
     }
@@ -388,22 +554,23 @@ final class SettingsStore: ObservableObject {
         compactWidth = 140
         compactHeight = 1
         gooeyBlurRadius = 16
+        compactBandAutoSize = true
+        compactBandWidth = 300
+        compactBandHeight = 38
+        compactBandTopRadius = 0
+        compactBandBottomRadius = 0
+        compactBandYOffset = 0
         topBarHeight = 40
-        expandDuration = 0.5
-        collapseDuration = 0.7
-        revealDelay = 0.31
+        restoreAnimationDefaults()
         bulgeDurationRatio = 0.22
         bulgeWidth = 76
         bulgeHeight = 46
-        contentFadeInDuration = 0.35
-        contentFadeOutDuration = 0.08
-        expandTimingCurve = "0.65, 0, 0.35, 1"
-        collapseTimingCurve = "0.25, 0.1, 0.25, 1"
         compactCornerRadius = 2
         expandedCornerRadius = 16
         bulgeCornerRadius = 23
         mode = .systemNotch
-        appFilterMode = .none
+        mediaPlayerBundleID = nil
         launchAtLoginEnabled = false
+        resetComponentLayout()
     }
 }
