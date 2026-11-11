@@ -13,8 +13,10 @@ final class WaveformLayer: CALayer {
     private static let barWeights: [CGFloat] = [0.78, 1.0, 0.86]
     private static let barDurations: [Double] = [0.9, 1.15, 1.0]
     static let animationKey = "waveform.pulse"
-    private static let frozenScale: CGFloat = 0.34
     private static let minimumScale: CGFloat = 0.3
+    private static let pulseMinimumScale: CGFloat = 0.34
+    private static let pausedScales: [CGFloat] = [0.4, 0.68, 0.5]
+    private static let staticPlayingScales: [CGFloat] = [0.56, 0.88, 0.68]
 
     let barWidth: CGFloat = 3.2
     let barGap: CGFloat = 5
@@ -73,6 +75,9 @@ final class WaveformLayer: CALayer {
     /// 外部电平驱动（真实系统音频）：只写 transform，不挂 CA 动画、不重建槽位。
     func setLevels(_ levels: [CGFloat]) {
         guard mode == .playing, !levels.isEmpty else { return }
+        if isPulsing {
+            removePulseAnimations()
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, bar) in barLayers.enumerated() {
@@ -84,7 +89,8 @@ final class WaveformLayer: CALayer {
     }
 
     func apply(mode newMode: Mode, animate: Bool) {
-        guard newMode != mode || (newMode == .playing && !isPulsing) else { return }
+        let shouldPulse = newMode == .playing && animate
+        guard newMode != mode || (newMode == .playing && isPulsing != shouldPulse) else { return }
         mode = newMode
         switch newMode {
         case .hidden:
@@ -120,11 +126,9 @@ final class WaveformLayer: CALayer {
     }
 
     private func startPulsing(animate: Bool) {
-        for bar in barLayers {
-            bar.removeAnimation(forKey: Self.animationKey)
-        }
+        removePulseAnimations()
         guard animate else {
-            restoreFullScale()
+            setScales(Self.staticPlayingScales)
             return
         }
         let timing = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -133,7 +137,7 @@ final class WaveformLayer: CALayer {
         for (index, bar) in barLayers.enumerated() {
             let duration = Self.barDurations[index % Self.barDurations.count]
             let animation = CABasicAnimation(keyPath: "transform.scale.y")
-            animation.fromValue = Self.frozenScale
+            animation.fromValue = Self.pulseMinimumScale
             animation.toValue = 1.0
             animation.duration = duration
             animation.autoreverses = true
@@ -147,27 +151,32 @@ final class WaveformLayer: CALayer {
     }
 
     private func freeze() {
-        for bar in barLayers {
-            bar.removeAnimation(forKey: Self.animationKey)
-        }
-        setScale(Self.frozenScale)
+        removePulseAnimations()
+        setScales(Self.pausedScales)
     }
 
     private func stopPulsing() {
-        for bar in barLayers {
-            bar.removeAnimation(forKey: Self.animationKey)
-        }
+        removePulseAnimations()
         setScale(1)
     }
 
-    private func restoreFullScale() { setScale(1) }
+    private func removePulseAnimations() {
+        for bar in barLayers {
+            bar.removeAnimation(forKey: Self.animationKey)
+        }
+    }
 
-    private func setScale(_ scale: CGFloat) {
+    private func setScales(_ scales: [CGFloat]) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for bar in barLayers {
+        for (index, bar) in barLayers.enumerated() {
+            let scale = scales[index % scales.count]
             bar.transform = CATransform3DMakeScale(1, scale, 1)
         }
         CATransaction.commit()
+    }
+
+    private func setScale(_ scale: CGFloat) {
+        setScales([scale])
     }
 }

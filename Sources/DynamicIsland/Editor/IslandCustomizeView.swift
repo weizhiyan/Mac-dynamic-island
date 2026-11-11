@@ -600,10 +600,19 @@ private struct IslandPreviewStage: View {
     /// 收起态刘海带的真实几何：自动模式下跟随系统刘海，手动模式用设置值。
     private var collapsedBandSize: CGSize {
         let notch = NotchDetector.current()
-        let autoWidth = max(notch.frame.width, CompactMediaView.contentWidth)
-        let width = settings.compactBandAutoSize ? autoWidth : settings.compactBandWidth
-        let height = settings.compactBandAutoSize ? max(notch.frame.height, 1) : settings.compactBandHeight
-        return CGSize(width: width, height: height)
+        let playbackEffectEnabled = CompactMediaView.isPlaybackEffectEnabled
+        return NotchDetector.compactBand(
+            notch: notch,
+            baseWidth: settings.compactWidth,
+            limitWidth: settings.topBarWidth - 24,
+            sideExtension: playbackEffectEnabled ? CompactMediaView.sideExtension : 0,
+            contentWidth: playbackEffectEnabled ? CompactMediaView.contentWidth : 0,
+            widthOverride: playbackEffectEnabled && !settings.compactBandAutoSize ? settings.compactBandWidth : nil,
+            heightOverride: playbackEffectEnabled && !settings.compactBandAutoSize ? settings.compactBandHeight : nil,
+            topRadiusOverride: playbackEffectEnabled && settings.compactBandTopRadius > 0 ? settings.compactBandTopRadius : nil,
+            bottomRadiusOverride: playbackEffectEnabled && settings.compactBandBottomRadius > 0 ? settings.compactBandBottomRadius : nil,
+            verticalOffset: playbackEffectEnabled ? settings.compactBandYOffset : 0
+        )?.frame.size ?? CGSize(width: settings.compactWidth, height: settings.compactHeight)
     }
 }
 
@@ -626,43 +635,55 @@ private struct ExpandedIslandPreview: View {
 
 // MARK: - 收起态预览
 
-/// 收起态刘海带示意：黑色刘海形 + 头像 + 波纹，几何与真实紧凑带一致。
+/// 收起态刘海带示意：效果关闭时只保留原生刘海轮廓。
 private struct CollapsedIslandPreview: View {
     @EnvironmentObject var settings: SettingsStore
 
     var body: some View {
         let notch = NotchDetector.current()
-        let width = settings.compactBandAutoSize
-            ? max(notch.frame.width, CompactMediaView.contentWidth)
-            : settings.compactBandWidth
-        let height = settings.compactBandAutoSize ? max(notch.frame.height, 1) : settings.compactBandHeight
-        let bottomRadius = settings.compactBandBottomRadius > 0
-            ? settings.compactBandBottomRadius
-            : height * NotchDetector.notchBottomRadiusRatio
+        let playbackEffectEnabled = CompactMediaView.isPlaybackEffectEnabled
+        let band = NotchDetector.compactBand(
+            notch: notch,
+            baseWidth: settings.compactWidth,
+            limitWidth: settings.topBarWidth - 24,
+            sideExtension: playbackEffectEnabled ? CompactMediaView.sideExtension : 0,
+            contentWidth: playbackEffectEnabled ? CompactMediaView.contentWidth : 0,
+            widthOverride: playbackEffectEnabled && !settings.compactBandAutoSize ? settings.compactBandWidth : nil,
+            heightOverride: playbackEffectEnabled && !settings.compactBandAutoSize ? settings.compactBandHeight : nil,
+            topRadiusOverride: playbackEffectEnabled && settings.compactBandTopRadius > 0 ? settings.compactBandTopRadius : nil,
+            bottomRadiusOverride: playbackEffectEnabled && settings.compactBandBottomRadius > 0 ? settings.compactBandBottomRadius : nil,
+            verticalOffset: playbackEffectEnabled ? settings.compactBandYOffset : 0
+        )
+        let width = band?.frame.width ?? settings.compactWidth
+        let height = band?.frame.height ?? settings.compactHeight
+        let topRadius = band?.topRadius ?? 0
+        let bottomRadius = band?.bottomRadius ?? height * NotchDetector.notchBottomRadiusRatio
         let shape = UnevenRoundedRectangle(
-            topLeadingRadius: settings.compactBandTopRadius,
+            topLeadingRadius: topRadius,
             bottomLeadingRadius: bottomRadius,
             bottomTrailingRadius: bottomRadius,
-            topTrailingRadius: settings.compactBandTopRadius,
+            topTrailingRadius: topRadius,
             style: .continuous
         )
 
         ZStack {
             shape.fill(.black)
 
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(.white.opacity(0.16))
-                    .frame(width: 20, height: 20)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.8))
-                    )
-                CompactBandWaveform()
-                Spacer(minLength: 0)
+            if playbackEffectEnabled {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(.white.opacity(0.16))
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.8))
+                        )
+                    CompactBandWaveform()
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
             }
-            .padding(.horizontal, 8)
         }
         .frame(width: width, height: height)
         .clipShape(shape)

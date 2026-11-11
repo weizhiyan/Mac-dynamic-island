@@ -183,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.autosaveName = statusItemName
         statusItem = item
         guard let button = item.button else { return }
-        let statusImage = Bundle.module.url(forResource: "StatusIcon", withExtension: "png")
+        let statusImage = AppResources.url(forResource: "StatusIcon", withExtension: "png")
             .flatMap(NSImage.init(contentsOf:))
             ?? NSImage(systemSymbolName: "capsule.fill", accessibilityDescription: "灵动岛")
         statusImage?.isTemplate = true

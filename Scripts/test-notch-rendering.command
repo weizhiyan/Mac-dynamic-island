@@ -64,11 +64,18 @@ func fakeNotch(width: CGFloat, height: CGFloat, screen: CGSize, centerX: CGFloat
     )
 }
 
-// 本机实测：主屏 1800x1169，刘海 221x38。
+// 本机实测：主屏 1800x1169，刘海 221x38。播放内容需要落在刘海两侧可见区域。
 let screen = CGSize(width: 1800, height: 1169)
 let realNotch = fakeNotch(width: 221, height: 38, screen: screen)
-if let band = NotchDetector.compactBand(notch: realNotch, baseWidth: 140, limitWidth: 1053) {
-    expect("紧凑带宽度等于刘海宽度（内容收进刘海内，不横向外扩）", abs(band.frame.width - 221) < 0.001, "得到 \(band.frame.width)")
+if let band = NotchDetector.compactBand(
+    notch: realNotch,
+    baseWidth: 140,
+    limitWidth: 1053,
+    sideExtension: CompactMediaView.sideExtension,
+    contentWidth: CompactMediaView.contentWidth
+) {
+    expect("紧凑带在物理刘海两侧留出可见内容区", abs(band.frame.width - 289) < 0.001, "得到 \(band.frame.width)")
+    expect("左右内容区至少容纳头像和波纹", CompactMediaView.sideExtension >= 28)
     expect("紧凑带不小于内容宽度", band.frame.width >= 66, "得到 \(band.frame.width)")
     expect("紧凑带高度 = 刘海高度", abs(band.frame.height - 38) < 0.001, "得到 \(band.frame.height)")
     expect("紧凑带顶边贴屏幕顶端，不向屏幕外溢出", abs(band.frame.maxY - screen.height) < 0.001, "maxY=\(band.frame.maxY)")
@@ -144,7 +151,7 @@ expect("播放时波纹层可见", waveform.mode == .playing && !waveform.isHidd
 waveform.apply(mode: .frozen, animate: true)
 let scales = (waveform.sublayers ?? []).map { $0.transform.m22 }
 expect("暂停时动画全部撤掉", pulsingCount(waveform) == 0, "得到 \(pulsingCount(waveform))")
-expect("暂停时停在低幅静态值", scales.allSatisfy { abs($0 - 0.34) < 0.001 }, "得到 \(scales)")
+expect("暂停时保留有层次的静态波形", scales.allSatisfy { $0 >= 0.3 && $0 <= 0.8 } && Set(scales.map { Int($0 * 100) }).count >= 2, "得到 \(scales)")
 
 // 真实电平驱动：只写 transform，不挂 CA 动画。
 waveform.apply(mode: .playing, animate: false)
@@ -153,6 +160,12 @@ let levelScales = (waveform.sublayers ?? []).map { $0.transform.m22 }
 expect("真实电平直接决定每根高度", abs(levelScales[0] - 0.9) < 0.001 && abs(levelScales[2] - 1.0) < 0.001, "得到 \(levelScales)")
 expect("电平不会让波纹塌成小点", levelScales.allSatisfy { $0 >= 0.3 }, "得到 \(levelScales)")
 expect("电平驱动不挂 CA 动画", pulsingCount(waveform) == 0, "得到 \(pulsingCount(waveform))")
+
+// 从伪节奏切换到真实电平：首个电平回调必须立即撤掉旧动画。
+waveform.apply(mode: .playing, animate: true)
+expect("伪节奏已启动", pulsingCount(waveform) == 3, "得到 \(pulsingCount(waveform))")
+waveform.setLevels([0.7, 0.4, 0.9])
+expect("真实电平接管时撤掉伪节奏动画", pulsingCount(waveform) == 0, "得到 \(pulsingCount(waveform))")
 
 waveform.apply(mode: .hidden, animate: true)
 expect("停止/无曲目时隐藏且无残留动画", waveform.mode == .hidden && waveform.isHidden && pulsingCount(waveform) == 0)
@@ -217,6 +230,7 @@ SWIFT
 if ! swiftc -O \
   "$SRC/Utilities/NotchDetector.swift" \
   "$SRC/Utilities/ArtworkTint.swift" \
+  "$SRC/Views/CompactMediaView.swift" \
   "$SRC/Views/WaveformLayer.swift" \
   "$WORK_DIR/main.swift" \
   -o "$WORK_DIR/notch-rendering-check" 2> "$WORK_DIR/compile.log"; then
@@ -246,6 +260,12 @@ check_absent "紧凑内容层不进入 gooeyContainer 滤镜链" "$SRC/Window/Is
 check_present "紧凑带宽度由 NotchDetector 统一推导" "$SRC/Window/IslandWindowController.swift" "NotchDetector\.compactBand"
 check_present "紧凑带用原生刘海轮廓而不是方角" "$SRC/Window/IslandWindowController.swift" "notchPath\(rect: bounds, topRadius"
 check_present "紧凑层窗口忽略鼠标事件" "$SRC/Window/IslandWindowController.swift" "compactWindow\.ignoresMouseEvents = true"
+check_present "收起态播放视觉暂时关闭" "$SRC/Views/CompactMediaView.swift" "isPlaybackEffectEnabled = false"
+check_present "关闭时不再创建紧凑媒体窗口几何" "$SRC/Window/IslandWindowController.swift" "CompactMediaView\.isPlaybackEffectEnabled"
+check_present "音乐摘要按钮按文字实际宽度跟随" "$SRC/Views/IslandRootView.swift" "\.overlay\(alignment: \.bottomLeading\)"
+check_present "融合窗口固定在 sRGB 色彩空间" "$SRC/Window/IslandWindowController.swift" "gooeyWindow\.colorSpace = \.sRGB"
+check_present "融合滤镜钳制 EDR 上溢颜色" "$SRC/Window/IslandWindowController.swift" "CIColorClamp"
+check_absent "紧凑带不再保留调试红色" "$SRC/Window/IslandWindowController.swift" "NSColor\.systemRed\.cgColor"
 check_present "主屏固定取 NSScreen.screens.first" "$SRC/Utilities/NotchDetector.swift" "screens\.first"
 check_absent "刘海测量不按鼠标所在屏幕定位" "$SRC/Utilities/NotchDetector.swift" "mouseLocation"
 check_present "紧凑层淡出复用 transitionID 中断保护" "$SRC/Window/IslandWindowController.swift" "transitionID == transition, !self\.compactContentWanted"
@@ -272,6 +292,11 @@ check_present "被抬离菜单栏的图标两栏都不显示" "$SRC/Managers/Men
 check_present "封面地址只接受本地文件或 http(s) 链接" "$SRC/Managers/MediaPlayerStore.swift" "case \"http\", \"https\""
 check_present "封面下载有体积上限" "$SRC/Managers/MediaPlayerStore.swift" "data.count <= Self.artworkByteLimit"
 check_present "封面只在内存缓存，不落盘" "$SRC/Managers/MediaPlayerStore.swift" "diskCapacity: 0"
+check_present "绑定播放器支持汽水音乐" "$SRC/Managers/MediaPlayerStore.swift" 'case soda = "com.soda.music"'
+check_present "汽水音乐使用独立媒体后端" "$SRC/Managers/MediaPlayerStore.swift" "SodaMusicController"
+check_present "汽水音乐读取当前系统媒体元数据" "$SRC/Resources/NowPlayingBridge.js" "MRNowPlayingRequest"
+check_present "汽水音乐使用系统媒体控制" "$SRC/Resources/NowPlayingBridge.js" "MRMediaRemoteSendCommand"
+check_absent "汽水音乐不再模拟窗口点击" "$SRC/Managers/SodaMusicController.swift" "CGEvent|postClick|AXPress"
 
 if [[ $FAILURES -eq 0 ]]; then
   print "\n全部通过。"

@@ -53,6 +53,7 @@ final class IslandWindowController: NSWindowController {
         gooeyWindow = NSPanel(contentRect: gooeyFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         gooeyWindow.isOpaque = false
         gooeyWindow.backgroundColor = .clear
+        gooeyWindow.colorSpace = .sRGB
         gooeyWindow.hasShadow = false
         gooeyWindow.level = .statusBar
         gooeyWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
@@ -63,22 +64,32 @@ final class IslandWindowController: NSWindowController {
 
         let gooeyView = NSView(frame: gooeyFrame)
         gooeyView.wantsLayer = true
+        gooeyView.layer?.isOpaque = false
         gooeyView.layer?.backgroundColor = NSColor.clear.cgColor
 
         gooeyContainer.frame = CGRect(x: 0, y: 0, width: topBarWidth, height: totalHeight)
+        gooeyContainer.isOpaque = false
+        gooeyContainer.backgroundColor = NSColor.clear.cgColor
+        gooeyContainer.contentsFormat = .RGBA8Uint
 
         let blur = CIFilter(name: "CIGaussianBlur")!
         blur.setValue(settings.gooeyBlurRadius, forKey: kCIInputRadiusKey)
         blurFilter = blur
 
         let matrix = CIFilter(name: "CIColorMatrix")!
-        matrix.setValue(CIVector(x: 1, y: 0, z: 0, w: 0), forKey: "inputRVector")
-        matrix.setValue(CIVector(x: 0, y: 1, z: 0, w: 0), forKey: "inputGVector")
-        matrix.setValue(CIVector(x: 0, y: 0, z: 1, w: 0), forKey: "inputBVector")
+        // 融合层只负责生成黑色轮廓。滤镜中间值若进入 EDR 范围，会在 XDR 屏上
+        // 显示成刺眼白屏，而截屏仍正常；这里把 RGB 固定为 0，并钳制 Alpha。
+        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputRVector")
+        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputGVector")
+        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBVector")
         matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 19), forKey: "inputAVector")
         matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: -9), forKey: "inputBiasVector")
 
-        gooeyContainer.filters = [blur, matrix]
+        let clamp = CIFilter(name: "CIColorClamp")!
+        clamp.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputMinComponents")
+        clamp.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputMaxComponents")
+
+        gooeyContainer.filters = [blur, matrix, clamp]
         gooeyView.layer?.addSublayer(gooeyContainer)
 
         topBarLayer.frame = Self.topBarFrame(width: Self.compactWidth(for: settings), bodyHeight: height, topBarWidth: topBarWidth, topBarHeight: topBarHeight)
@@ -101,6 +112,7 @@ final class IslandWindowController: NSWindowController {
         contentWindow = NSPanel(contentRect: contentFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         contentWindow.isOpaque = false
         contentWindow.backgroundColor = .clear
+        contentWindow.colorSpace = .sRGB
         contentWindow.hasShadow = false
         contentWindow.level = .statusBar
         contentWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
@@ -139,6 +151,7 @@ final class IslandWindowController: NSWindowController {
         compactWindow = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         compactWindow.isOpaque = false
         compactWindow.backgroundColor = .clear
+        compactWindow.colorSpace = .sRGB
         compactWindow.hasShadow = false
         compactWindow.level = .statusBar
         compactWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
@@ -150,8 +163,7 @@ final class IslandWindowController: NSWindowController {
         compactContainer.wantsLayer = true
         compactContainer.layer?.backgroundColor = NSColor.clear.cgColor
         compactContainer.layer?.masksToBounds = true
-        // 临时观察用：紧凑带主体改成红色，方便看清轮廓与圆角
-        compactBandLayer.fillColor = NSColor.systemRed.cgColor
+        compactBandLayer.fillColor = NSColor.black.cgColor
         compactContainer.layer?.addSublayer(compactBandLayer)
         compactMediaView.frame = .zero
         compactContainer.addSubview(compactMediaView)
@@ -193,7 +205,7 @@ final class IslandWindowController: NSWindowController {
             s.$topBarYOffset.map { _ in () }.eraseToAnyPublisher()
         ]
         Publishers.MergeMany(layoutChanges)
-        .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
+        .throttle(for: .milliseconds(50), scheduler: RunLoop.main, latest: true)
         .sink { [weak self] _ in self?.rebuildLayout() }
         .store(in: &cancellables)
         s.$columns
@@ -216,7 +228,9 @@ final class IslandWindowController: NSWindowController {
             .store(in: &cancellables)
         // 刘海加宽只跟随「有没有音乐内容」这一个布尔值，切歌刷新文案不会重建窗口。
         Publishers.CombineLatest(MediaPlayerStore.shared.$playbackState, MediaPlayerStore.shared.$track)
-            .map { _ in MediaPlayerStore.shared.hasCompactMedia }
+            .map { (value: (MediaPlaybackState, MediaTrack?)) -> Bool in
+                value.1 != nil && (value.0 == MediaPlaybackState.playing || value.0 == MediaPlaybackState.paused)
+            }
             .removeDuplicates()
             .map { _ in () }
             .debounce(for: .seconds(0.15), scheduler: RunLoop.main)
@@ -229,6 +243,10 @@ final class IslandWindowController: NSWindowController {
             MediaPlayerStore.shared.$avatarTint,
             MediaPlayerStore.shared.$playbackState
         )
+        .combineLatest(
+            MediaPlayerStore.shared.$elapsedTime,
+            MediaPlayerStore.shared.$duration
+        )
         .receive(on: RunLoop.main)
         .sink { [weak self] _ in self?.updateCompactMediaContents() }
         .store(in: &cancellables)
@@ -240,7 +258,8 @@ final class IslandWindowController: NSWindowController {
 
     /// 收起态紧凑带：几何全部由刘海推导，黑色主体和音乐内容层共用同一个结果。
     private static func measuredCompactBand(for settings: SettingsStore) -> CompactBand? {
-        guard MediaPlayerStore.shared.hasCompactMedia else { return nil }
+        guard CompactMediaView.isPlaybackEffectEnabled,
+              MediaPlayerStore.shared.hasCompactMedia else { return nil }
         return NotchDetector.compactBand(
             notch: NotchDetector.current(),
             baseWidth: settings.compactWidth,
@@ -284,6 +303,10 @@ final class IslandWindowController: NSWindowController {
 
     /// 只更新头像与波纹状态，不重建窗口、不改几何。
     private func updateCompactMediaContents() {
+        guard CompactMediaView.isPlaybackEffectEnabled else {
+            SystemAudioTap.shared.stop()
+            return
+        }
         let store = MediaPlayerStore.shared
         let mode: WaveformLayer.Mode
         switch (store.track != nil, store.playbackState) {
@@ -297,11 +320,16 @@ final class IslandWindowController: NSWindowController {
             reduceMotion: reduceMotion,
             showsCompact: !isExpanded && isEnabled && compactBand != nil
         )
+        let progress = store.duration > 0
+            ? CGFloat(min(max(store.elapsedTime / store.duration, 0), 1))
+            : nil
         compactMediaView.update(
             image: store.avatarImage,
             mode: mode,
             tint: store.avatarTint,
-            animates: mode == .playing && !reduceMotion && !audioDriven
+            progress: progress,
+            animates: mode == .playing && !reduceMotion && !audioDriven,
+            progressAnimates: mode == .playing && !reduceMotion
         )
     }
 

@@ -7,6 +7,8 @@ struct SettingsView: View {
     @EnvironmentObject var appStore: AppStore
     @State private var selectedPane: SettingsPane? = .overview
     @State private var draggedApp: AppItem?
+    @State private var confirmsReset = false
+    @ObservedObject private var mediaPlayer = MediaPlayerStore.shared
 
     var body: some View {
         HStack(spacing: 0) {
@@ -27,6 +29,12 @@ struct SettingsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(minWidth: 760, minHeight: 560)
         .ignoresSafeArea(.container, edges: .top)
+        .alert("恢复所有参数？", isPresented: $confirmsReset) {
+            Button("取消", role: .cancel) {}
+            Button("恢复默认", role: .destructive) { settings.restoreDefaults() }
+        } message: {
+            Text("布局、播放器绑定和动画参数将恢复默认值。")
+        }
     }
 
     private var sidebar: some View {
@@ -128,9 +136,23 @@ struct SettingsView: View {
                     .labelsHidden()
                     .pickerStyle(.menu)
                 }
-                Text("还没绑定播放器时，点灵动岛上的播放会自动打开已安装的播放器并开始播放，之后想换播放器在这里改。播放控制需要允许灵动岛自动化操作所选播放器。")
+                Text("点击播放可自动启动绑定的播放器；点击歌名可查看完整信息与切歌。Spotify 和音乐需要自动化授权；汽水音乐首次启动播放可能需要辅助功能授权，之后通过系统媒体服务控制。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack {
+                    Label(mediaPlayer.isBusy ? "正在连接播放器…" : mediaPlayer.track?.title ?? mediaPlayer.primaryStatusText,
+                          systemImage: mediaPlayer.lastError == nil ? "music.note" : "exclamationmark.triangle")
+                        .font(.callout).lineLimit(1)
+                    Spacer()
+                    Button("播放控制") { MusicWindowController.shared.present() }
+                }
+                if let error = mediaPlayer.lastError {
+                    Text(error).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("重试连接", action: mediaPlayer.retryConnection).disabled(mediaPlayer.isBusy)
+                        if mediaPlayer.permissionRequired { Button("前往授权", action: mediaPlayer.openPermissionSettings) }
+                    }
+                }
             }
 
             SettingsGroup("更新") {
@@ -148,7 +170,7 @@ struct SettingsView: View {
                     Label("恢复所有参数到默认值", systemImage: "arrow.counterclockwise")
                     Spacer()
                     Button("恢复默认") {
-                        settings.restoreDefaults()
+                        confirmsReset = true
                     }
                 }
                 HStack {

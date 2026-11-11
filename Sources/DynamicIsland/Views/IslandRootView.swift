@@ -98,16 +98,41 @@ struct IslandTopControls: View {
 /// 刘海左侧：头像 + 歌名 · 艺术家 + 播放暂停，一行截断，不做卡片。
 struct MusicMiniSummary: View {
     @EnvironmentObject private var mediaPlayer: MediaPlayerStore
+    @EnvironmentObject private var viewModel: IslandViewModel
 
     var body: some View {
         HStack(spacing: 6) {
-            MiniAvatar(image: mediaPlayer.avatarImage)
-
-            Text(summaryLine)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(mediaPlayer.track == nil ? AnyShapeStyle(.white.opacity(0.5)) : AnyShapeStyle(.white.opacity(0.88)))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            Button { MusicWindowController.shared.present() } label: {
+                HStack(spacing: 6) {
+                    MiniAvatar(image: mediaPlayer.avatarImage)
+                    Text(summaryLine)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(mediaPlayer.track == nil ? AnyShapeStyle(.white.opacity(0.5)) : AnyShapeStyle(.white.opacity(0.88)))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .overlay(alignment: .bottomLeading) {
+                            if let progress {
+                                PlaybackProgressLine(progress: progress)
+                                    .offset(y: 3)
+                            }
+                        }
+                    if mediaPlayer.track != nil {
+                        PlaybackWaveformBadge(
+                            state: mediaPlayer.playbackState,
+                            isActive: viewModel.isExpanded
+                        )
+                    }
+                    if mediaPlayer.lastError != nil {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 11)).foregroundStyle(.orange)
+                    }
+                }
+                .frame(minHeight: 27, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(mediaPlayer.lastError ?? "查看歌曲与播放控制")
+            .accessibilityLabel("查看歌曲与播放控制")
 
             MediaControlButton(
                 symbol: mediaPlayer.playbackState == .playing ? "pause.fill" : "play.fill",
@@ -116,6 +141,7 @@ struct MusicMiniSummary: View {
                 action: mediaPlayer.togglePlayPause
             )
             .disabled(mediaPlayer.isBusy)
+            .layoutPriority(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(mediaPlayer.lastError ?? mediaPlayer.track?.title ?? "播放")
@@ -124,6 +150,15 @@ struct MusicMiniSummary: View {
     private var summaryLine: String {
         guard let track = mediaPlayer.track else { return mediaPlayer.primaryStatusText }
         return "\(track.title) · \(track.artist)"
+    }
+
+    private var progress: Double? {
+        guard mediaPlayer.track != nil, mediaPlayer.duration > 0 else { return nil }
+        let elapsed = mediaPlayer.elapsedTime
+            + (mediaPlayer.playbackState == .playing
+                ? max(0, Date().timeIntervalSince(mediaPlayer.sampledAt))
+                : 0)
+        return min(max(elapsed / mediaPlayer.duration, 0), 1)
     }
 }
 
@@ -150,33 +185,102 @@ struct MiniAvatar: View {
     }
 }
 
+private struct PlaybackProgressLine: View {
+    let progress: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.1))
+                Capsule()
+                    .fill(.white.opacity(0.52))
+                    .frame(width: max(1, proxy.size.width * progress))
+                    .animation(.linear(duration: 2), value: progress)
+            }
+        }
+        .frame(height: 1.5)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct PlaybackWaveformBadge: View {
+    let state: MediaPlaybackState
+    let isActive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if state == .playing && isActive && !reduceMotion {
+                TimelineView(.periodic(from: .now, by: 1.0 / 18.0)) { context in
+                    bars(at: context.date)
+                }
+            } else {
+                bars(at: nil)
+            }
+        }
+        .frame(width: 10, height: 12)
+        .accessibilityHidden(true)
+    }
+
+    private func bars(at date: Date?) -> some View {
+        HStack(alignment: .center, spacing: 1.5) {
+            ForEach(0..<3, id: \.self) { index in
+                let pausedHeight: CGFloat = [4, 7, 5][index]
+                let phase = date.map {
+                    sin($0.timeIntervalSinceReferenceDate * 3 + Double(index) * 1.1)
+                } ?? 0
+                Capsule()
+                    .fill(.white.opacity(state == .playing ? 0.78 : 0.42))
+                    .frame(
+                        width: 1.8,
+                        height: state == .playing ? 4 + CGFloat(abs(phase)) * 8 : pausedHeight
+                    )
+            }
+        }
+    }
+}
+
 /// 刘海右侧：CPU 与内存百分比，同样一行纯文本。
 struct MetricsMiniSummary: View {
     @EnvironmentObject private var metrics: SystemMetricsStore
 
     var body: some View {
         HStack(spacing: 9) {
-            MiniMetric(title: "CPU", value: metrics.cpuUsage)
-            MiniMetric(title: "内存", value: metrics.memoryUsage)
+            MiniMetric(title: "CPU", value: metrics.cpu?.usage) { MetricsWindowController.shared.present(.cpu) }
+            MiniMetric(title: "内存", value: metrics.memory?.usage) { MetricsWindowController.shared.present(.memory) }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .allowsHitTesting(false)
     }
 }
 
 struct MiniMetric: View {
     let title: String
-    let value: Double
+    let value: Double?
+    let action: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 3) {
-            Text(title)
-                .font(.system(size: 9))
-                .foregroundStyle(.white.opacity(0.42))
-            Text("\(Int(value * 100))%")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.88))
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.65))
+                Text(value.map { "\(Int($0 * 100))%" } ?? "—")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.88))
+                    .frame(minWidth: 29, alignment: .trailing)
+            }
+            .padding(.horizontal, 4)
+            .frame(height: 27)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .background(isHovered ? Color.white.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7))
+        .onHover { isHovered = $0 }
+        .help("查看\(title)详情")
+        .accessibilityLabel("查看\(title)详情")
+        .accessibilityValue(value.map { "\(Int($0 * 100))%" } ?? "正在采样")
     }
 }

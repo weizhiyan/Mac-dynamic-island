@@ -18,6 +18,7 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
     private var stream: SCStream?
     private var generation = 0
     private var didReportUnavailable = false
+    private var isStarting = false
 
     private let queue = DispatchQueue(label: "dynamic-island.audio.tap", qos: .userInitiated)
     private var peak = [CGFloat](repeating: 0.05, count: 3)
@@ -33,7 +34,8 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
 
     /// 只能在主线程调用。
     func start() {
-        guard stream == nil, !didReportUnavailable else { return }
+        guard stream == nil, !isStarting, !didReportUnavailable else { return }
+        isStarting = true
         generation += 1
         let token = generation
         Task { [weak self] in
@@ -41,7 +43,11 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard let display = content.displays.first(where: { $0.frame.origin == .zero }) ?? content.displays.first else {
-                    await MainActor.run { self.reportUnavailable() }
+                    await MainActor.run {
+                        guard token == self.generation else { return }
+                        self.isStarting = false
+                        self.reportUnavailable()
+                    }
                     return
                 }
                 let configuration = SCStreamConfiguration()
@@ -66,10 +72,15 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
                         return
                     }
                     self.stream = stream
+                    self.isStarting = false
                     self.isCapturing = true
                 }
             } catch {
-                await MainActor.run { self.reportUnavailable() }
+                await MainActor.run {
+                    guard token == self.generation else { return }
+                    self.isStarting = false
+                    self.reportUnavailable()
+                }
             }
         }
     }
@@ -77,6 +88,7 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
     /// 只能在主线程调用。
     func stop() {
         generation += 1
+        isStarting = false
         guard let stream else { return }
         self.stream = nil
         isCapturing = false
@@ -92,15 +104,18 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
         onUnavailable?()
     }
 
-    fileprivate func handleLevelFailure() {
-        Task { @MainActor in self.reportUnavailable() }
+    fileprivate func handleLevelFailure(from failedStream: SCStream) {
+        Task { @MainActor in
+            guard self.stream === failedStream else { return }
+            self.reportUnavailable()
+        }
     }
 
     fileprivate func handle(_ sampleBuffer: CMSampleBuffer) {
-        guard CMSampleBufferGetNumSamples(sampleBuffer) > 0,
-              let bands = Self.bandEnergies(from: sampleBuffer) else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastEmit >= 1.0 / 30.0 else { return }
+        guard CMSampleBufferGetNumSamples(sampleBuffer) > 0,
+              let bands = Self.bandEnergies(from: sampleBuffer) else { return }
         lastEmit = now
 
         // 自动增益：用缓慢衰减的峰值归一，避免要手调音量增益。
@@ -119,6 +134,11 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
 
     /// 三档频带的近似能量：低通后的 RMS 当低频、原始 RMS 当中频、相邻样本差的 RMS 当高频。
     private static func bandEnergies(from sampleBuffer: CMSampleBuffer) -> [Double]? {
+        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let description = CMAudioFormatDescriptionGetStreamBasicDescription(format),
+              description.pointee.mFormatID == kAudioFormatLinearPCM,
+              description.pointee.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              description.pointee.mBitsPerChannel == 32 else { return nil }
         var needed = 0
         let sizeStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sampleBuffer, bufferListSizeNeededOut: &needed, bufferListOut: nil, bufferListSize: 0,
@@ -141,7 +161,7 @@ final class SystemAudioTap: NSObject, @unchecked Sendable {
 
         var low = 0.0, mid = 0.0, high = 0.0, samples = 0
         var lowPass = 0.0, previous = 0.0
-        let buffers = UnsafeMutableBufferPointer<AudioBuffer>(start: &listPointer.pointee.mBuffers, count: bufferCount)
+        let buffers = UnsafeMutableAudioBufferListPointer(listPointer)
         for buffer in buffers {
             guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
             let frameCount = Int(buffer.mDataByteSize) / MemoryLayout<Float32>.size
@@ -175,6 +195,6 @@ private final class AudioTapDelegate: NSObject, SCStreamOutput, SCStreamDelegate
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        owner?.handleLevelFailure()
+        owner?.handleLevelFailure(from: stream)
     }
 }

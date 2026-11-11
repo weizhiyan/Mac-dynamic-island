@@ -15,13 +15,13 @@ struct CompactBand {
     let topRadius: CGFloat
     /// 底部两个凸圆角，决定「像不像刘海」。
     let bottomRadius: CGFloat
-    /// 刘海本身的 frame，用于把内容收进物理缺口以内。
+    /// 刘海本身的 frame，用于区分物理缺口与两侧可见内容区。
     let notchFrame: CGRect
 }
 
 enum NotchDetector {
-    /// 收起态在刘海左右两侧各争取的内容宽度。内容已能完整收进刘海内，默认不再横向外扩。
-    static let compactSideExtension: CGFloat = 0
+    /// 收起态在物理刘海左右各留出的内容宽度，保证头像、进度环和波形不被摄像头区域遮住。
+    static let compactSideExtension: CGFloat = 34
     /// 原生刘海的底部凸圆角约为高度的 0.28。顶部贴着屏幕边缘，不能切出内收圆角。
     static let notchBottomRadiusRatio: CGFloat = 0.28
 

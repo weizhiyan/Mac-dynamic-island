@@ -6,7 +6,7 @@ BUILD_DIR="$ROOT_DIR/Build"
 APP_PRODUCT="DynamicIsland"
 APP_DISPLAY_NAME="灵动岛"
 APP_VERSION="${APP_VERSION:-1.0.4}"
-APP_BUILD="${APP_BUILD:-15}"
+APP_BUILD="${APP_BUILD:-18}"
 APPCAST_URL="${APPCAST_URL:-https://raw.githubusercontent.com/weizhiyan/Mac-dynamic-island/main/appcast.xml}"
 SPARKLE_PUBLIC_KEY="28WnLNAVZfPjPPkIQIZlni3sSjuwE8kvn3nPAT2X/W8="
 APP_BUNDLE="$BUILD_DIR/$APP_DISPLAY_NAME.app"
@@ -35,6 +35,7 @@ if [[ -z "${BINARY_PATH:-}" ]]; then
   exit 1
 fi
 RESOURCE_BUNDLE="$BIN_DIR/${APP_PRODUCT}_${APP_PRODUCT}.bundle"
+RESOURCE_BUNDLE_NAME="${APP_PRODUCT}_${APP_PRODUCT}.bundle"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$FRAMEWORKS_DIR"
@@ -44,6 +45,13 @@ chmod +x "$MACOS_DIR/$APP_PRODUCT"
 if [[ -d "$RESOURCE_BUNDLE" ]]; then
   cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/"
 fi
+
+for required_resource in StatusIcon.png NowPlayingBridge.js; do
+  if [[ ! -f "$RESOURCES_DIR/$RESOURCE_BUNDLE_NAME/$required_resource" ]]; then
+    echo "Missing required resource: $RESOURCE_BUNDLE_NAME/$required_resource"
+    exit 1
+  fi
+done
 
 if [[ -d "$BIN_DIR/Sparkle.framework" ]]; then
   cp -R "$BIN_DIR/Sparkle.framework" "$FRAMEWORKS_DIR/"

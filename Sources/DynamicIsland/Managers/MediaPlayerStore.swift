@@ -1,26 +1,58 @@
 import AppKit
 import ApplicationServices
 import Combine
+import Darwin
 import Foundation
 
 enum MediaPlaybackState: Equatable { case playing, paused, stopped, unavailable }
 
+enum MediaArtworkSource: Hashable {
+    case url(URL)
+    case embedded(Data)
+}
+
 struct MediaTrack: Equatable {
     let title: String
     let artist: String
-    /// 播放器给出的封面地址：本地文件，或播放器自己暴露的图片链接。
-    var artworkURL: URL?
+    /// AppleScript 播放器返回封面地址，系统 Now Playing 播放器直接返回图片数据。
+    var artwork: MediaArtworkSource?
+    var album: String = ""
 }
 
 enum MediaPlayerOption: String, CaseIterable, Identifiable {
     case spotify = "com.spotify.client"
     case music = "com.apple.Music"
+    case soda = "com.soda.music"
+
     var id: String { rawValue }
-    var title: String { self == .spotify ? "Spotify" : "音乐" }
-    var applicationURL: URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: rawValue)
-            ?? URL(fileURLWithPath: self == .spotify ? "/Applications/Spotify.app" : "/System/Applications/Music.app")
+
+    var title: String {
+        switch self {
+        case .spotify: return "Spotify"
+        case .music: return "音乐"
+        case .soda: return "汽水音乐"
+        }
     }
+
+    var appleScriptApplicationName: String? {
+        switch self {
+        case .spotify: return "Spotify"
+        case .music: return "Music"
+        case .soda: return nil
+        }
+    }
+
+    var applicationURL: URL? {
+        let fallbackPath: String
+        switch self {
+        case .spotify: fallbackPath = "/Applications/Spotify.app"
+        case .music: fallbackPath = "/System/Applications/Music.app"
+        case .soda: fallbackPath = "/Applications/汽水音乐.app"
+        }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: rawValue)
+            ?? URL(fileURLWithPath: fallbackPath)
+    }
+
     var isInstalled: Bool {
         guard let url = applicationURL else { return false }
         return FileManager.default.fileExists(atPath: url.path)
@@ -36,7 +68,10 @@ final class MediaPlayerStore: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var permissionRequired = false
     @Published private(set) var isPlayerRunning = false
-    /// 当前曲目的本地封面。播放器没有给出可用本地封面时为 nil，视图需回退到 `playerIcon`。
+    @Published private(set) var elapsedTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
+    @Published private(set) var sampledAt = Date()
+    /// 当前曲目的封面。播放器没有给出可用封面时为 nil，视图需回退到 `playerIcon`。
     @Published private(set) var artwork: NSImage?
     /// 紧凑带与展开摘要实际展示的头像：本地封面 > 播放器图标。
     @Published private(set) var avatarImage: NSImage?
@@ -69,17 +104,25 @@ final class MediaPlayerStore: ObservableObject {
         return "尚未播放"
     }
 
-    private let backendQueue = DispatchQueue(label: "dynamic-island.media.backend", qos: .utility)
+    private let backendQueue = DispatchQueue(label: "dynamic-island.media.backend", qos: .userInitiated)
     private let scriptRunner = AppleScriptRunner()
+    private let sodaMusic = SodaMusicController(
+        scriptURL: AppResources.url(forResource: "NowPlayingBridge", withExtension: "js")
+    )
+    private var pollInFlight = false
+    private var lastSuccessfulPoll = Date.distantPast
+    private var commandError: String?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var isSleeping = false
     private var pollTimer: DispatchSourceTimer?
     private var settingsCancellable: AnyCancellable?
     private var generation = 0
     private var deniedPlayers = Set<String>()
     private var iconCache: [String: NSImage] = [:]
-    private var loadedArtworkURL: URL?
+    private var loadedArtworkSource: MediaArtworkSource?
     private var artworkTask: URLSessionDataTask?
-    private var artworkCache: [URL: NSImage] = [:]
-    private var artworkCacheOrder: [URL] = []
+    private var artworkCache: [MediaArtworkSource: NSImage] = [:]
+    private var artworkCacheOrder: [MediaArtworkSource] = []
     private static let artworkCacheLimit = 8
     private static let artworkByteLimit = 6 * 1024 * 1024
     private lazy var artworkSession = {
@@ -96,7 +139,10 @@ final class MediaPlayerStore: ObservableObject {
         // Do not touch SettingsStore while the static singleton is being constructed.
         DispatchQueue.main.async { [weak self] in self?.observeSettings() }
     }
-    deinit { pollTimer?.cancel(); artworkTask?.cancel() }
+    deinit {
+        pollTimer?.cancel(); artworkTask?.cancel()
+        workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+    }
 
     var selectedOption: MediaPlayerOption? {
         guard let id = SettingsStore.shared.mediaPlayerBundleID else { return nil }
@@ -104,16 +150,45 @@ final class MediaPlayerStore: ObservableObject {
     }
 
     func refreshNow() {
+        guard !pollInFlight, !isBusy, !isSleeping else { return }
         guard let player = selectedOption else {
             applyUnavailable(generation: generation, playerID: nil, running: false)
             return
         }
+        guard !deniedPlayers.contains(player.rawValue) else { return }
         let token = generation
-        backendQueue.async { [weak self] in self?.poll(player: player, generation: token) }
+        pollInFlight = true
+        backendQueue.async { [weak self] in
+            self?.poll(player: player, generation: token)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.pollInFlight = false
+                if token != self.generation { self.refreshNow() }
+            }
+        }
     }
     func togglePlayPause() { execute(.playPause) }
     func previousTrack() { execute(.previous) }
     func nextTrack() { execute(.next) }
+
+    func openPlayer() {
+        guard let url = selectedOption?.applicationURL else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    func openPermissionSettings() {
+        let pane = lastError?.contains("辅助功能") == true ? "Privacy_Accessibility" : "Privacy_Automation"
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func retryConnection() {
+        commandError = nil
+        lastError = nil
+        permissionRequired = false
+        if let player = selectedOption { deniedPlayers.remove(player.rawValue) }
+        refreshNow()
+    }
 
     /// 没绑定播放器（或绑定的应用被卸载）时，点播放/上一首/下一首家都打不开。
     /// 这里兜底：自动绑一个已安装的播放器（音乐 App 一定在），
@@ -132,66 +207,116 @@ final class MediaPlayerStore: ObservableObject {
             .removeDuplicates().receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.bindingDidChange() }
         startPolling()
-        bindingDidChange()
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
+            workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                guard let self else { return }
+                if name == NSWorkspace.didWakeNotification { self.isSleeping = false; self.refreshNow(); return }
+                if let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                   application.bundleIdentifier == self.selectedOption?.rawValue { self.refreshNow() }
+            })
+        }
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.isSleeping = true })
     }
 
     private func bindingDidChange() {
         generation &+= 1
+        lastSuccessfulPoll = .distantPast
+        commandError = nil
+        elapsedTime = 0; duration = 0
+        artworkTask?.cancel()
         track = nil; playbackState = .unavailable; lastError = nil
         permissionRequired = false; isPlayerRunning = false; isBusy = false
-        artwork = nil; loadedArtworkURL = nil; avatarImage = nil; avatarTint = nil
-        guard let player = selectedOption, player.isInstalled else { return }
-        let token = generation
-        backendQueue.async { [weak self] in self?.poll(player: player, generation: token) }
+        artwork = nil; loadedArtworkSource = nil; avatarImage = nil; avatarTint = nil
+        guard selectedOption?.isInstalled == true else { return }
+        refreshNow()
     }
 
     private func startPolling() {
         pollTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: backendQueue)
-        timer.schedule(deadline: .now() + 0.25, repeating: 1.5, leeway: .milliseconds(150))
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.25, repeating: 2, leeway: .milliseconds(200))
         timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            guard let player = self.selectedOption, player.isInstalled else {
-                self.applyUnavailable(generation: self.generation, playerID: nil, running: false); return
-            }
-            self.poll(player: player, generation: self.generation)
+            self?.refreshNow()
         }
         pollTimer = timer; timer.resume()
     }
 
     private func poll(player: MediaPlayerOption, generation token: Int) {
+        guard DispatchQueue.main.sync(execute: { token == generation && player == selectedOption && !isSleeping }) else { return }
         guard isRunning(player) else {
             applyUnavailable(generation: token, playerID: player.rawValue, running: false); return
         }
-        let result = scriptRunner.execute(player.script(for: .state), timeout: 4)
+        if player == .soda {
+            pollSodaMusic(player, generation: token)
+            return
+        }
+        guard let script = player.script(for: .state) else {
+            applyError("无法创建播放器脚本", permissionRequired: false, generation: token, playerID: player.rawValue)
+            return
+        }
+        let result = scriptRunner.execute(script, timeout: 4)
         guard result.success else {
             applyError(result.error ?? "读取播放器状态失败", permissionRequired: result.isPermissionError, generation: token, playerID: player.rawValue); return
         }
         let title = result.values[safe: 0]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let artist = result.values[safe: 1]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let state = Self.playbackState(from: result.values[safe: 2]?.lowercased() ?? "")
-        let artwork = Self.artworkURL(from: result.values[safe: 3] ?? "")
+        let artwork = Self.artworkURL(from: result.values[safe: 3] ?? "").map(MediaArtworkSource.url)
         let newTrack = title.isEmpty || title == "missing value"
             ? nil
-            : MediaTrack(title: title, artist: artist.isEmpty ? player.title : artist, artworkURL: artwork)
+            : MediaTrack(title: title, artist: artist.isEmpty ? player.title : artist, artwork: artwork)
+        applyTiming(elapsed: Double(result.values[safe: 4] ?? "") ?? 0, duration: Double(result.values[safe: 5] ?? "") ?? 0, generation: token)
+        applyState(track: newTrack, playbackState: state, running: true, error: nil, generation: token, playerID: player.rawValue)
+    }
+
+    private func pollSodaMusic(_ player: MediaPlayerOption, generation token: Int) {
+        let response = sodaMusic.read()
+        guard let snapshot = response.snapshot else {
+            applyReadFailure(response.error ?? "等待汽水音乐提供歌曲信息", player: player, generation: token)
+            return
+        }
+        applySodaSnapshot(snapshot, player: player, generation: token)
+    }
+
+    private func applySodaSnapshot(_ snapshot: SodaMusicSnapshot, player: MediaPlayerOption, generation token: Int) {
+        let image = snapshot.artworkBase64.flatMap { Data(base64Encoded: $0) }.flatMap {
+            $0.count <= Self.artworkByteLimit ? MediaArtworkSource.embedded($0) : nil
+        }
+        let newTrack = MediaTrack(
+            title: snapshot.title,
+            artist: snapshot.artist.isEmpty ? player.title : snapshot.artist,
+            artwork: image,
+            album: snapshot.album
+        )
+        applyTiming(elapsed: snapshot.progress, duration: snapshot.duration, generation: token)
+        let state: MediaPlaybackState = snapshot.isPlaying ? .playing : .paused
         applyState(track: newTrack, playbackState: state, running: true, error: nil, generation: token, playerID: player.rawValue)
     }
 
     private func execute(_ command: MediaCommand) {
         ensureBinding()
         guard let player = selectedOption, player.isInstalled, !isBusy else { return }
-        guard !deniedPlayers.contains(player.rawValue) else {
-            permissionRequired = true; lastError = permissionMessage(for: player); return
-        }
+        deniedPlayers.remove(player.rawValue)
+        commandError = nil
         isBusy = true; lastError = nil
         let token = generation
         backendQueue.async { [weak self] in
             guard let self else { return }
+            guard DispatchQueue.main.sync(execute: { token == self.generation && player == self.selectedOption }) else { return }
+            if player == .soda {
+                self.executeSodaMusic(command, player: player, generation: token)
+                return
+            }
             // 不预检 Apple Events 权限：AEDeterminePermissionToAutomateTarget 在拿不到
             // TCC 响应时会无限期阻塞（实测卡死整条后台队列，播放控制全废）。
             // 直接发脚本，让系统走原生授权弹窗；真被拒了脚本会带着权限错误回来。
             if self.isRunning(player) {
-                let result = self.scriptRunner.execute(player.script(for: command), timeout: 2)
+                guard let script = player.script(for: command) else {
+                    self.finishCommand(ScriptResult(success: false, values: [], error: "无法创建播放器脚本"), player: player, generation: token)
+                    return
+                }
+                let result = self.scriptRunner.execute(script, timeout: 2)
                 self.finishCommand(result, player: player, generation: token); return
             }
             guard command == .playPause else {
@@ -205,8 +330,57 @@ final class MediaPlayerStore: ObservableObject {
                 self.finishCommand(ScriptResult(success: false, values: [], error: "\(player.title)启动超时"), player: player, generation: token); return
             }
             // Launching can restore a paused session, so always issue explicit play.
-            let startResult = self.scriptRunner.execute(player.script(for: .play), timeout: 2)
+            guard let playScript = player.script(for: .play) else {
+                self.finishCommand(ScriptResult(success: false, values: [], error: "无法创建播放器脚本"), player: player, generation: token)
+                return
+            }
+            let startResult = self.scriptRunner.execute(playScript, timeout: 2)
             self.finishCommand(startResult, player: player, generation: token)
+        }
+    }
+
+    private func executeSodaMusic(_ command: MediaCommand, player: MediaPlayerOption, generation token: Int) {
+        let wasRunning = sodaMusic.isRunning
+        if !wasRunning {
+            guard command == .playPause else {
+                finishCommand(ScriptResult(success: false, values: [], error: "播放器尚未运行"), player: player, generation: token)
+                return
+            }
+            guard sodaMusic.launch() else {
+                finishCommand(ScriptResult(success: false, values: [], error: "\(player.title)启动超时"), player: player, generation: token)
+                return
+            }
+        }
+
+        let hasSession = sodaMusic.read().snapshot != nil
+        if !hasSession, command == .play || command == .playPause {
+            if let error = sodaMusic.prepareSession() {
+                finishCommand(ScriptResult(success: false, values: [], error: error), player: player, generation: token)
+                return
+            }
+        }
+
+        let sodaCommand: SodaMusicCommand
+        switch command {
+        case .play:
+            sodaCommand = .play
+        case .playPause:
+            sodaCommand = wasRunning && hasSession ? .togglePlayPause : .play
+        case .previous:
+            sodaCommand = .previous
+        case .next:
+            sodaCommand = .next
+        case .state:
+            pollSodaMusic(player, generation: token)
+            return
+        }
+
+        switch sodaMusic.send(sodaCommand) {
+        case .success(let snapshot):
+            applySodaSnapshot(snapshot, player: player, generation: token)
+            backendCommandFinished(error: nil, permissionRequired: false, generation: token)
+        case .failure(let error):
+            finishCommand(ScriptResult(success: false, values: [], error: error), player: player, generation: token)
         }
     }
 
@@ -224,10 +398,11 @@ final class MediaPlayerStore: ObservableObject {
     }
     private func finishCommand(_ result: ScriptResult, player: MediaPlayerOption, generation token: Int) {
         DispatchQueue.main.async { [weak self] in
+            guard let self, token == self.generation, player.rawValue == self.selectedOption?.rawValue else { return }
             if result.success {
-                self?.deniedPlayers.remove(player.rawValue)
+                self.deniedPlayers.remove(player.rawValue)
             } else if result.isPermissionError {
-                self?.deniedPlayers.insert(player.rawValue)
+                self.deniedPlayers.insert(player.rawValue)
             }
         }
         backendCommandFinished(error: result.success ? nil : result.error, permissionRequired: result.isPermissionError, generation: token)
@@ -236,6 +411,7 @@ final class MediaPlayerStore: ObservableObject {
     private func backendCommandFinished(error: String?, permissionRequired required: Bool, generation token: Int) {
         DispatchQueue.main.async { [weak self] in
             guard let self, token == self.generation else { return }
+            self.commandError = error
             self.isBusy = false; self.permissionRequired = required; self.setLastError(error)
         }
     }
@@ -243,28 +419,47 @@ final class MediaPlayerStore: ObservableObject {
     private func applyUnavailable(generation token: Int, playerID: String?, running: Bool) {
         DispatchQueue.main.async { [weak self] in
             guard let self, token == self.generation, playerID == self.selectedOption?.rawValue || playerID == nil else { return }
+            self.elapsedTime = 0; self.duration = 0
             self.applyIfChanged(track: nil, playbackState: .unavailable, running: running, error: nil)
+        }
+    }
+    private func applyTiming(elapsed: TimeInterval, duration: TimeInterval, generation token: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, token == self.generation else { return }
+            self.elapsedTime = elapsed.isFinite ? max(0, elapsed) : 0
+            self.duration = duration.isFinite ? max(0, duration) : 0
+            self.sampledAt = Date()
+        }
+    }
+    private func applyReadFailure(_ error: String, player: MediaPlayerOption, generation token: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, token == self.generation, player.rawValue == self.selectedOption?.rawValue else { return }
+            if Date().timeIntervalSince(self.lastSuccessfulPoll) < 6, self.track != nil { return }
+            self.applyIfChanged(track: nil, playbackState: .unavailable, running: true, error: error)
         }
     }
     private func applyError(_ error: String, permissionRequired required: Bool, generation token: Int, playerID: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self, token == self.generation, playerID == self.selectedOption?.rawValue else { return }
             self.permissionRequired = required
-            self.applyIfChanged(track: nil, playbackState: .unavailable, running: self.isPlayerRunning, error: error)
+            if required { self.deniedPlayers.insert(playerID) }
+            self.applyIfChanged(track: nil, playbackState: .unavailable, running: true, error: error)
         }
     }
     private func applyState(track newTrack: MediaTrack?, playbackState state: MediaPlaybackState, running: Bool, error: String?, generation token: Int, playerID: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self, token == self.generation, playerID == self.selectedOption?.rawValue else { return }
+            self.lastSuccessfulPoll = Date()
+            self.permissionRequired = false
             self.applyIfChanged(track: newTrack, playbackState: state, running: running, error: error)
         }
     }
     private func applyIfChanged(track newTrack: MediaTrack?, playbackState state: MediaPlaybackState, running: Bool, error: String?) {
         if track != newTrack { track = newTrack }
-        loadArtwork(for: newTrack?.artworkURL)
+        loadArtwork(for: newTrack?.artwork)
         refreshAvatar()
         if playbackState != state { playbackState = state }
-        if isPlayerRunning != running { isPlayerRunning = running }; setLastError(error)
+        if isPlayerRunning != running { isPlayerRunning = running }; setLastError(error ?? commandError)
     }
 
     /// 头像与波纹取色共用同一张图：本地封面 > 播放器图标。
@@ -275,19 +470,19 @@ final class MediaPlayerStore: ObservableObject {
         avatarTint = image.flatMap { ArtworkTint.color(from: $0) }
     }
 
-    /// 只在封面地址变化时取图：本地文件读盘，播放器给出的图片链接走网络；
-    /// 结果按地址缓存，播放器轮询刷新歌名不会重复解码或重复请求。
-    private func loadArtwork(for url: URL?) {
-        guard url != loadedArtworkURL else { return }
-        loadedArtworkURL = url
+    /// 只在封面来源变化时取图：本地文件读盘，图片链接走网络，系统 Now Playing 直接解码内嵌数据。
+    /// 结果按来源缓存，播放器轮询刷新歌名不会重复解码或重复请求。
+    private func loadArtwork(for source: MediaArtworkSource?) {
+        guard source != loadedArtworkSource else { return }
+        loadedArtworkSource = source
         artworkTask?.cancel()
         artworkTask = nil
-        guard let url else {
+        guard let source else {
             artwork = nil
             refreshAvatar()
             return
         }
-        if let cached = artworkCache[url] {
+        if let cached = artworkCache[source] {
             artwork = cached
             refreshAvatar()
             return
@@ -295,32 +490,41 @@ final class MediaPlayerStore: ObservableObject {
         artwork = nil
         refreshAvatar()
         let token = generation
-        if url.isFileURL {
-            backendQueue.async { [weak self] in self?.deliverArtwork(NSImage(contentsOf: url), for: url, token: token) }
-            return
+        switch source {
+        case .url(let url):
+            if url.isFileURL {
+                backendQueue.async { [weak self] in
+                    self?.deliverArtwork(NSImage(contentsOf: url), for: source, token: token)
+                }
+                return
+            }
+            let task = artworkSession.dataTask(with: url) { [weak self] data, _, _ in
+                guard let self, let data, data.count <= Self.artworkByteLimit else { return }
+                self.deliverArtwork(NSImage(data: data), for: source, token: token)
+            }
+            artworkTask = task
+            task.resume()
+        case .embedded(let data):
+            backendQueue.async { [weak self] in
+                self?.deliverArtwork(NSImage(data: data), for: source, token: token)
+            }
         }
-        let task = artworkSession.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self, let data, data.count <= Self.artworkByteLimit else { return }
-            self.deliverArtwork(NSImage(data: data), for: url, token: token)
-        }
-        artworkTask = task
-        task.resume()
     }
 
-    private func deliverArtwork(_ image: NSImage?, for url: URL, token: Int) {
+    private func deliverArtwork(_ image: NSImage?, for source: MediaArtworkSource, token: Int) {
         guard let image, image.size != .zero else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self, token == self.generation, self.loadedArtworkURL == url else { return }
-            self.rememberArtwork(image, for: url)
+            guard let self, token == self.generation, self.loadedArtworkSource == source else { return }
+            self.rememberArtwork(image, for: source)
             self.artwork = image
             self.refreshAvatar()
         }
     }
 
-    private func rememberArtwork(_ image: NSImage, for url: URL) {
-        artworkCache[url] = image
-        artworkCacheOrder.removeAll { $0 == url }
-        artworkCacheOrder.append(url)
+    private func rememberArtwork(_ image: NSImage, for source: MediaArtworkSource) {
+        artworkCache[source] = image
+        artworkCacheOrder.removeAll { $0 == source }
+        artworkCacheOrder.append(source)
         while artworkCacheOrder.count > Self.artworkCacheLimit {
             artworkCache.removeValue(forKey: artworkCacheOrder.removeFirst())
         }
@@ -329,7 +533,12 @@ final class MediaPlayerStore: ObservableObject {
     private func isRunning(_ player: MediaPlayerOption) -> Bool { NSRunningApplication.runningApplications(withBundleIdentifier: player.rawValue).contains { !$0.isTerminated } }
     private func permissionMessage(for player: MediaPlayerOption) -> String { "请在系统设置 > 隐私与安全性 > 自动化中允许本应用控制\(player.title)" }
     private static func playbackState(from value: String) -> MediaPlaybackState {
-        switch value { case "playing": return .playing; case "paused": return .paused; case "stopped": return .stopped; default: return .unavailable }
+        switch value {
+        case "playing", "播放中", "正在播放": return .playing
+        case "paused", "已暂停", "暂停": return .paused
+        case "stopped", "已停止", "停止": return .stopped
+        default: return .unavailable
+        }
     }
     /// 播放器给出的封面地址：本地文件必须存在，网络地址只接受 http/https 且带主机名，其余一律忽略。
     private static func artworkURL(from value: String) -> URL? {
@@ -349,40 +558,31 @@ private struct ScriptResult {
     let success: Bool; let values: [String]; let error: String?
     var isPermissionError: Bool {
         guard let error else { return false }; let value = error.lowercased()
-        return value.contains("not authorized") || value.contains("not permitted") || value.contains("权限")
+        return value.contains("not authorized") || value.contains("not permitted") || value.contains("权限") || value.contains("-1743")
     }
 }
 
 private final class AppleScriptRunner {
-    private let queue = DispatchQueue(label: "dynamic-island.media.apple-script")
-    private let lock = NSLock(); private var busy = false
     func execute(_ source: String, timeout: TimeInterval) -> ScriptResult {
-        lock.lock(); guard !busy else { lock.unlock(); return ScriptResult(success: false, values: [], error: "播放器操作仍在进行") }; busy = true; lock.unlock()
-        let semaphore = DispatchSemaphore(value: 0); var result = ScriptResult(success: false, values: [], error: "播放器操作超时")
-        queue.async { [weak self] in
-            result = Self.run(source); self?.lock.lock(); self?.busy = false; self?.lock.unlock(); semaphore.signal()
-        }
-        if semaphore.wait(timeout: .now() + timeout) == .timedOut { return ScriptResult(success: false, values: [], error: "播放器操作超时") }
-        return result
-    }
-    private static func run(_ source: String) -> ScriptResult {
-        var error: NSDictionary?; guard let script = NSAppleScript(source: source) else { return ScriptResult(success: false, values: [], error: "无法创建播放器脚本") }
-        let descriptor = script.executeAndReturnError(&error)
-        if let error { return ScriptResult(success: false, values: [], error: error[NSAppleScript.errorMessage] as? String ?? "播放器自动化失败") }
-        if descriptor.numberOfItems > 0 { return ScriptResult(success: true, values: (1...descriptor.numberOfItems).compactMap { descriptor.atIndex($0)?.stringValue }, error: nil) }
-        return ScriptResult(success: true, values: descriptor.stringValue.map { [$0] } ?? [], error: nil)
+        let output = CommandRunner.run(executable: "/usr/bin/osascript", arguments: ["-e", source], timeout: timeout)
+        let text = String(decoding: output.data, as: UTF8.self).trimmingCharacters(in: .newlines)
+        return ScriptResult(success: output.succeeded,
+                            values: text.components(separatedBy: String(UnicodeScalar(31))),
+                            error: output.succeeded ? nil : output.error)
     }
 }
 
 private extension MediaPlayerOption {
-    func script(for command: MediaCommand) -> String {
-        let app = self == .spotify ? "Spotify" : "Music"
+    func script(for command: MediaCommand) -> String? {
+        guard let app = appleScriptApplicationName else { return nil }
         switch command {
         case .state: return """
             tell application "\(app)"
                 set currentTitle to ""
                 set currentArtist to ""
                 set currentArtwork to ""
+                set currentPosition to "0"
+                set currentDuration to "0"
                 try
                     set currentTitle to name of current track
                     set currentArtist to artist of current track
@@ -390,7 +590,14 @@ private extension MediaPlayerOption {
                 try
                     set currentArtwork to (artwork url of current track) as text
                 end try
-                return {currentTitle, currentArtist, (player state as text), currentArtwork}
+                try
+                    set currentPosition to (player position as text)
+                    set currentDuration to (duration of current track)
+                    if "\(app)" is "Spotify" then set currentDuration to currentDuration / 1000
+                    set currentDuration to currentDuration as text
+                end try
+                set separator to ASCII character 31
+                return currentTitle & separator & currentArtist & separator & (player state as text) & separator & currentArtwork & separator & currentPosition & separator & currentDuration
             end tell
             """
         case .play: return "tell application \"\(app)\" to play"
@@ -401,44 +608,3 @@ private extension MediaPlayerOption {
     }
 }
 private extension Array { subscript(safe index: Index) -> Element? { indices.contains(index) ? self[index] : nil } }
-
-final class SystemMetricsStore: ObservableObject {
-    static let shared = SystemMetricsStore()
-    @Published private(set) var cpuUsage: Double = 0
-    @Published private(set) var memoryUsage: Double = 0
-    private let queue = DispatchQueue(label: "dynamic-island.metrics", qos: .utility)
-    private var timer: DispatchSourceTimer?
-    private var hostPort: mach_port_t = mach_host_self()
-    private var previousTicks: (user: UInt32, system: UInt32, idle: UInt32, nice: UInt32)?
-    private init() {}
-    deinit { timer?.cancel(); mach_port_deallocate(mach_task_self_, hostPort) }
-    func setActive(_ active: Bool) {
-        queue.async { [weak self] in
-            guard let self else { return }; self.timer?.cancel(); self.timer = nil
-            guard active else { return }
-            let timer = DispatchSource.makeTimerSource(queue: self.queue); timer.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(100)); timer.setEventHandler { [weak self] in self?.refresh() }; self.timer = timer; timer.resume()
-        }
-    }
-    private func refresh() {
-        let cpu = readCPUUsage(); let memory = readMemoryUsage()
-        DispatchQueue.main.async { [weak self] in guard let self else { return }; if self.cpuUsage != cpu { self.cpuUsage = cpu }; if self.memoryUsage != memory { self.memoryUsage = memory } }
-    }
-    private func readCPUUsage() -> Double {
-        var info = host_cpu_load_info(); var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
-        let result = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(hostPort, HOST_CPU_LOAD_INFO, $0, &count) } }
-        guard result == KERN_SUCCESS else { return cpuUsage }
-        let ticks = (user: info.cpu_ticks.0, system: info.cpu_ticks.1, idle: info.cpu_ticks.2, nice: info.cpu_ticks.3); defer { previousTicks = ticks }; guard let previousTicks else { return 0 }
-        let user = Double(ticks.user &- previousTicks.user), system = Double(ticks.system &- previousTicks.system), idle = Double(ticks.idle &- previousTicks.idle), nice = Double(ticks.nice &- previousTicks.nice); let total = user + system + idle + nice
-        return total > 0 ? min(max((total - idle) / total, 0), 1) : 0
-    }
-    private func readMemoryUsage() -> Double {
-        var stats = vm_statistics64(); var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
-        let result = withUnsafeMutablePointer(to: &stats) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics64(hostPort, HOST_VM_INFO64, $0, &count) } }; guard result == KERN_SUCCESS else { return memoryUsage }
-        var pageSize: vm_size_t = 0; host_page_size(hostPort, &pageSize)
-        let activePages = UInt64(stats.active_count)
-        let purgeablePages = UInt64(stats.purgeable_count)
-        let reclaimableActive = min(activePages, purgeablePages)
-        let usedPages = (activePages - reclaimableActive) + UInt64(stats.wire_count) + UInt64(stats.compressor_page_count)
-        return min(max(Double(usedPages) * Double(pageSize) / Double(ProcessInfo.processInfo.physicalMemory), 0), 1)
-    }
-}
