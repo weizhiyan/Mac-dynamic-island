@@ -177,18 +177,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupStatusItem() {
-        let statusItemName = "DynamicIsland.MainControl"
-        let preferredPositionKey = "NSStatusItem Preferred Position \(statusItemName)"
-        let migrationKey = "DynamicIsland.MainControlVisibilityVersion"
-        if UserDefaults.standard.integer(forKey: migrationKey) < 1 {
-            UserDefaults.standard.set(0.0, forKey: preferredPositionKey)
-            UserDefaults.standard.set(true, forKey: "NSStatusItem Visible \(statusItemName)")
-            UserDefaults.standard.set(1, forKey: migrationKey)
-        }
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.autosaveName = statusItemName
-        item.behavior = []
-        item.isVisible = true
+        MenuBarEntry.prepareDefaults()
+        // Attach the stable identity and content before Control Center hosts the item.
+        let item = NSStatusBar.system.statusItem(withLength: 0)
+        item.autosaveName = MenuBarEntry.autosaveName
+        item.behavior = [.removalAllowed]
         statusItem = item
         guard let button = item.button else { return }
         let statusImage = NSImage(systemSymbolName: "capsule.inset.filled", accessibilityDescription: "灵动岛")
@@ -204,13 +197,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.setAccessibilityLabel("灵动岛菜单")
         button.setAccessibilityIdentifier("DynamicIsland.MainControl")
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        item.length = NSStatusItem.squareLength
+        item.isVisible = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak item] in
+            guard let item, self?.statusItem === item else { return }
+            MenuBarEntry.shared.check(item)
+        }
     }
 
     func restoreMenuBarIcon() {
+        guard !MenuBarEntry.shared.isRecovering else { return }
         closeMenuBarPopover()
-        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
-        UserDefaults.standard.removeObject(forKey: "DynamicIsland.MainControlVisibilityVersion")
-        setupStatusItem()
+        MenuBarEntry.shared.beginRecovery()
+        if let item = statusItem {
+            item.isVisible = false
+            NSStatusBar.system.removeStatusItem(item)
+            item.autosaveName = nil
+        }
+        statusItem = nil
+        // Retire the old scene before resetting defaults; its teardown can write visibility back.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            MenuBarEntry.prepareDefaults(restoring: true)
+            self.setupStatusItem()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let item = self?.statusItem else { return }
+                MenuBarEntry.shared.check(item, reportRecovery: true)
+            }
+        }
     }
 
     // MARK: - 菜单栏气泡弹窗

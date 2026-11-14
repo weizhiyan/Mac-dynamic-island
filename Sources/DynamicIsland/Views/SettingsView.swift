@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var confirmsReset = false
     @ObservedObject private var accessibility = AccessibilityPermission.shared
     @ObservedObject private var mediaPlayer = MediaPlayerStore.shared
+    @ObservedObject private var menuBarEntry = MenuBarEntry.shared
 
     init(initialPane: SettingsPane = .overview, accessibility: AccessibilityPermission = .shared) {
         _selectedPane = State(initialValue: initialPane)
@@ -101,6 +102,19 @@ struct SettingsView: View {
                     Label("灵动岛菜单栏入口", systemImage: "capsule.inset.filled")
                     Spacer()
                     Button("恢复图标") { AppDelegate.shared?.restoreMenuBarIcon() }
+                        .disabled(menuBarEntry.isRecovering)
+                }
+                if #available(macOS 26.0, *) {
+                    HStack {
+                        Label("系统菜单栏设置", systemImage: "menubar.rectangle")
+                        Spacer()
+                        Button("打开", action: MenuBarEntry.openSystemSettings)
+                    }
+                }
+                if let message = menuBarEntry.recoveryMessage {
+                    Text(message)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             SettingsGroup("灵动岛") {
