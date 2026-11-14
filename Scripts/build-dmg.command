@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${VERSION:-1.0.4}"
+VERSION="${VERSION:-1.0.5}"
 BUILD_ARCH="${BUILD_ARCH:-}"
 if [[ -z "${ARTIFACT_SUFFIX:-}" && "$BUILD_ARCH" == "x86_64" ]]; then
   ARTIFACT_SUFFIX="-intel"
@@ -16,7 +16,7 @@ DMG_ROOT="/tmp/lingdongdao-dmg-root"
 
 cd "$ROOT_DIR"
 
-APP_VERSION="$VERSION" APP_BUILD="${APP_BUILD:-2}" BUILD_ARCH="$BUILD_ARCH" NO_OPEN=1 "$ROOT_DIR/LaunchDynamicIsland.command"
+APP_VERSION="$VERSION" BUILD_ARCH="$BUILD_ARCH" NO_OPEN=1 "$ROOT_DIR/LaunchDynamicIsland.command"
 
 rm -rf "$DMG_ROOT" "$ROOT_DIR/Release/$DMG_NAME"
 mkdir -p "$DMG_ROOT" "$ROOT_DIR/Release"

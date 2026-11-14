@@ -3,6 +3,7 @@ import ApplicationServices
 import Combine
 import Darwin
 import Foundation
+import ImageIO
 
 enum MediaPlaybackState: Equatable { case playing, paused, stopped, unavailable }
 
@@ -98,10 +99,21 @@ final class MediaPlayerStore: ObservableObject {
 
     /// 主状态文案：错误 > 歌名 > 未打开 > 未播放。
     var primaryStatusText: String {
+        if permissionRequired { return selectedOption == .soda ? "首次播放待授权" : "需要播放权限" }
         if lastError != nil { return "播放器暂不可用" }
         if let title = track?.title { return title }
         if !isPlayerRunning { return "\(selectedOption?.title ?? "播放器") 未打开" }
         return "尚未播放"
+    }
+
+    var playbackControlTitle: String {
+        if permissionRequired, selectedOption == .soda { return "打开汽水音乐" }
+        return playbackState == .playing ? "暂停" : "播放"
+    }
+
+    var playbackControlSymbol: String {
+        if permissionRequired, selectedOption == .soda { return "arrow.up.forward.app" }
+        return playbackState == .playing ? "pause.fill" : "play.fill"
     }
 
     private let backendQueue = DispatchQueue(label: "dynamic-island.media.backend", qos: .userInitiated)
@@ -112,10 +124,16 @@ final class MediaPlayerStore: ObservableObject {
     private var pollInFlight = false
     private var lastSuccessfulPoll = Date.distantPast
     private var commandError: String?
+    private var expectedPlaybackState: MediaPlaybackState?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var isSleeping = false
+    private var consumers = Set<String>()
+    private var activationObserver: NSObjectProtocol?
+    private var resumeAfterPermission = false
+    private var permissionWatchTimer: DispatchSourceTimer?
     private var pollTimer: DispatchSourceTimer?
     private var settingsCancellable: AnyCancellable?
+    private var observedBinding: String?
     private var generation = 0
     private var deniedPlayers = Set<String>()
     private var iconCache: [String: NSImage] = [:]
@@ -123,7 +141,7 @@ final class MediaPlayerStore: ObservableObject {
     private var artworkTask: URLSessionDataTask?
     private var artworkCache: [MediaArtworkSource: NSImage] = [:]
     private var artworkCacheOrder: [MediaArtworkSource] = []
-    private static let artworkCacheLimit = 8
+    private static let artworkCacheLimit = 3
     private static let artworkByteLimit = 6 * 1024 * 1024
     private lazy var artworkSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -131,7 +149,7 @@ final class MediaPlayerStore: ObservableObject {
         configuration.timeoutIntervalForResource = 20
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .returnCacheDataElseLoad
-        configuration.urlCache = URLCache(memoryCapacity: 8 * 1024 * 1024, diskCapacity: 0)
+        configuration.urlCache = nil
         return URLSession(configuration: configuration)
     }()
 
@@ -140,8 +158,9 @@ final class MediaPlayerStore: ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.observeSettings() }
     }
     deinit {
-        pollTimer?.cancel(); artworkTask?.cancel()
+        pollTimer?.cancel(); artworkTask?.cancel(); permissionWatchTimer?.cancel()
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
     }
 
     var selectedOption: MediaPlayerOption? {
@@ -149,13 +168,23 @@ final class MediaPlayerStore: ObservableObject {
         return MediaPlayerOption(rawValue: id)
     }
 
+    func setActive(_ active: Bool, consumer: String) {
+        let previouslyActive = !consumers.isEmpty
+        if active { consumers.insert(consumer) } else { consumers.remove(consumer) }
+        guard previouslyActive != !consumers.isEmpty else { return }
+        startPolling()
+        if active { refreshNow() }
+    }
+
     func refreshNow() {
+        refreshAccessibilityStatus()
         guard !pollInFlight, !isBusy, !isSleeping else { return }
         guard let player = selectedOption else {
             applyUnavailable(generation: generation, playerID: nil, running: false)
             return
         }
-        guard !deniedPlayers.contains(player.rawValue) else { return }
+        // MediaRemote can recover a Soda session without accessibility permission.
+        guard player == .soda || !deniedPlayers.contains(player.rawValue) else { return }
         let token = generation
         pollInFlight = true
         backendQueue.async { [weak self] in
@@ -167,27 +196,90 @@ final class MediaPlayerStore: ObservableObject {
             }
         }
     }
-    func togglePlayPause() { execute(.playPause) }
+    func togglePlayPause() {
+        refreshAccessibilityStatus()
+        if permissionRequired, selectedOption == .soda {
+            openPlayer()
+            return
+        }
+        cancelPermissionWatch()
+        execute(.playPause)
+    }
     func previousTrack() { execute(.previous) }
     func nextTrack() { execute(.next) }
 
     func openPlayer() {
+        cancelPermissionWatch()
         guard let url = selectedOption?.applicationURL else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     func openPermissionSettings() {
-        let pane = lastError?.contains("辅助功能") == true ? "Privacy_Accessibility" : "Privacy_Automation"
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
+        if selectedOption == .soda {
+            SodaSessionStarter.requestPermission()
+            if resumeAfterPermission { watchForPermission() }
+            return
+        }
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") else { return }
         NSWorkspace.shared.open(url)
     }
 
     func retryConnection() {
+        refreshAccessibilityStatus()
+        if resumeAfterPermission, selectedOption == .soda, AccessibilityPermission.shared.isGranted {
+            cancelPermissionWatch()
+            execute(.play)
+            return
+        }
+        if permissionRequired, selectedOption == .soda {
+            refreshNow()
+            return
+        }
         commandError = nil
         lastError = nil
         permissionRequired = false
         if let player = selectedOption { deniedPlayers.remove(player.rawValue) }
         refreshNow()
+    }
+
+    private func refreshAccessibilityStatus() {
+        if AccessibilityPermission.shared.refresh(), selectedOption == .soda, permissionRequired {
+            permissionRequired = false
+            commandError = nil
+            lastError = nil
+            deniedPlayers.remove(MediaPlayerOption.soda.rawValue)
+        }
+    }
+
+    private func watchForPermission() {
+        permissionWatchTimer?.cancel()
+        let deadline = Date().addingTimeInterval(120)
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(200))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            guard self.selectedOption == .soda, self.resumeAfterPermission, Date() < deadline else {
+                self.cancelPermissionWatch()
+                return
+            }
+            self.resumePlaybackIfAuthorized()
+        }
+        permissionWatchTimer = timer
+        timer.resume()
+    }
+
+    private func resumePlaybackIfAuthorized() {
+        refreshAccessibilityStatus()
+        guard permissionWatchTimer != nil, resumeAfterPermission,
+              AccessibilityPermission.shared.isGranted, !isBusy else { return }
+        cancelPermissionWatch()
+        execute(.play)
+    }
+
+    private func cancelPermissionWatch() {
+        permissionWatchTimer?.cancel()
+        permissionWatchTimer = nil
+        resumeAfterPermission = false
     }
 
     /// 没绑定播放器（或绑定的应用被卸载）时，点播放/上一首/下一首家都打不开。
@@ -211,29 +303,51 @@ final class MediaPlayerStore: ObservableObject {
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
             workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                 guard let self else { return }
-                if name == NSWorkspace.didWakeNotification { self.isSleeping = false; self.refreshNow(); return }
+                if name == NSWorkspace.didWakeNotification {
+                    self.isSleeping = false
+                    self.startPolling()
+                    if !self.consumers.isEmpty { self.refreshNow() }
+                    return
+                }
                 if let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                   application.bundleIdentifier == self.selectedOption?.rawValue { self.refreshNow() }
+                   application.bundleIdentifier == self.selectedOption?.rawValue, !self.consumers.isEmpty { self.refreshNow() }
             })
         }
-        workspaceObservers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.isSleeping = true })
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isSleeping = true
+            self?.cancelPermissionWatch()
+            self?.startPolling()
+        })
+        activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.resumePlaybackIfAuthorized()
+        }
     }
 
     private func bindingDidChange() {
+        let binding = SettingsStore.shared.mediaPlayerBundleID
+        guard observedBinding != binding else { return }
+        observedBinding = binding
         generation &+= 1
         lastSuccessfulPoll = .distantPast
         commandError = nil
+        cancelPermissionWatch()
+        expectedPlaybackState = nil
         elapsedTime = 0; duration = 0
         artworkTask?.cancel()
         track = nil; playbackState = .unavailable; lastError = nil
         permissionRequired = false; isPlayerRunning = false; isBusy = false
         artwork = nil; loadedArtworkSource = nil; avatarImage = nil; avatarTint = nil
+        artworkCache.removeAll()
+        artworkCacheOrder.removeAll()
+        startPolling()
         guard selectedOption?.isInstalled == true else { return }
-        refreshNow()
+        if !consumers.isEmpty { refreshNow() }
     }
 
     private func startPolling() {
         pollTimer?.cancel()
+        pollTimer = nil
+        guard !consumers.isEmpty, !isSleeping, selectedOption != nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.25, repeating: 2, leeway: .milliseconds(200))
         timer.setEventHandler { [weak self] in
@@ -273,7 +387,8 @@ final class MediaPlayerStore: ObservableObject {
     private func pollSodaMusic(_ player: MediaPlayerOption, generation token: Int) {
         let response = sodaMusic.read()
         guard let snapshot = response.snapshot else {
-            applyReadFailure(response.error ?? "等待汽水音乐提供歌曲信息", player: player, generation: token)
+            if let error = response.error { applyReadFailure(error, player: player, generation: token) }
+            else { applyUnavailable(generation: token, playerID: player.rawValue, running: true) }
             return
         }
         applySodaSnapshot(snapshot, player: player, generation: token)
@@ -296,16 +411,24 @@ final class MediaPlayerStore: ObservableObject {
 
     private func execute(_ command: MediaCommand) {
         ensureBinding()
+        bindingDidChange()
         guard let player = selectedOption, player.isInstalled, !isBusy else { return }
         deniedPlayers.remove(player.rawValue)
         commandError = nil
+        switch command {
+        case .play: expectedPlaybackState = .playing
+        case .playPause: expectedPlaybackState = playbackState == .playing ? .paused : .playing
+        default: expectedPlaybackState = nil
+        }
+        permissionRequired = false
         isBusy = true; lastError = nil
         let token = generation
+        let intendedState = expectedPlaybackState
         backendQueue.async { [weak self] in
             guard let self else { return }
             guard DispatchQueue.main.sync(execute: { token == self.generation && player == self.selectedOption }) else { return }
             if player == .soda {
-                self.executeSodaMusic(command, player: player, generation: token)
+                self.executeSodaMusic(command, intendedState: intendedState, player: player, generation: token)
                 return
             }
             // 不预检 Apple Events 权限：AEDeterminePermissionToAutomateTarget 在拿不到
@@ -319,7 +442,7 @@ final class MediaPlayerStore: ObservableObject {
                 let result = self.scriptRunner.execute(script, timeout: 2)
                 self.finishCommand(result, player: player, generation: token); return
             }
-            guard command == .playPause else {
+            guard command == .playPause || command == .play else {
                 self.finishCommand(ScriptResult(success: false, values: [], error: "播放器尚未运行"), player: player, generation: token)
                 return
             }
@@ -339,10 +462,10 @@ final class MediaPlayerStore: ObservableObject {
         }
     }
 
-    private func executeSodaMusic(_ command: MediaCommand, player: MediaPlayerOption, generation token: Int) {
+    private func executeSodaMusic(_ command: MediaCommand, intendedState: MediaPlaybackState?, player: MediaPlayerOption, generation token: Int) {
         let wasRunning = sodaMusic.isRunning
         if !wasRunning {
-            guard command == .playPause else {
+            guard command == .playPause || command == .play else {
                 finishCommand(ScriptResult(success: false, values: [], error: "播放器尚未运行"), player: player, generation: token)
                 return
             }
@@ -365,7 +488,8 @@ final class MediaPlayerStore: ObservableObject {
         case .play:
             sodaCommand = .play
         case .playPause:
-            sodaCommand = wasRunning && hasSession ? .togglePlayPause : .play
+            // Preserve the displayed button's intent even if metadata arrives late.
+            sodaCommand = intendedState == .paused && hasSession ? .pause : .play
         case .previous:
             sodaCommand = .previous
         case .next:
@@ -401,7 +525,7 @@ final class MediaPlayerStore: ObservableObject {
             guard let self, token == self.generation, player.rawValue == self.selectedOption?.rawValue else { return }
             if result.success {
                 self.deniedPlayers.remove(player.rawValue)
-            } else if result.isPermissionError {
+            } else if result.isPermissionError, player != .soda {
                 self.deniedPlayers.insert(player.rawValue)
             }
         }
@@ -412,6 +536,7 @@ final class MediaPlayerStore: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self, token == self.generation else { return }
             self.commandError = error
+            self.resumeAfterPermission = required && self.selectedOption == .soda
             self.isBusy = false; self.permissionRequired = required; self.setLastError(error)
         }
     }
@@ -450,7 +575,12 @@ final class MediaPlayerStore: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self, token == self.generation, playerID == self.selectedOption?.rawValue else { return }
             self.lastSuccessfulPoll = Date()
-            self.permissionRequired = false
+            if self.expectedPlaybackState == state || (self.permissionRequired && self.selectedOption == .soda) {
+                self.commandError = nil
+                self.expectedPlaybackState = nil
+                self.cancelPermissionWatch()
+            }
+            if self.commandError == nil { self.permissionRequired = false }
             self.applyIfChanged(track: newTrack, playbackState: state, running: running, error: error)
         }
     }
@@ -494,21 +624,37 @@ final class MediaPlayerStore: ObservableObject {
         case .url(let url):
             if url.isFileURL {
                 backendQueue.async { [weak self] in
-                    self?.deliverArtwork(NSImage(contentsOf: url), for: source, token: token)
+                    let image = CGImageSourceCreateWithURL(url as CFURL, nil).flatMap(Self.thumbnail)
+                    self?.deliverArtwork(image, for: source, token: token)
                 }
                 return
             }
             let task = artworkSession.dataTask(with: url) { [weak self] data, _, _ in
                 guard let self, let data, data.count <= Self.artworkByteLimit else { return }
-                self.deliverArtwork(NSImage(data: data), for: source, token: token)
+                self.deliverArtwork(Self.thumbnail(data: data), for: source, token: token)
             }
             artworkTask = task
             task.resume()
         case .embedded(let data):
             backendQueue.async { [weak self] in
-                self?.deliverArtwork(NSImage(data: data), for: source, token: token)
+                self?.deliverArtwork(Self.thumbnail(data: data), for: source, token: token)
             }
         }
+    }
+
+    private static func thumbnail(data: Data) -> NSImage? {
+        CGImageSourceCreateWithData(data as CFData, nil).flatMap(thumbnail)
+    }
+
+    private static func thumbnail(_ source: CGImageSource) -> NSImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 256,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 
     private func deliverArtwork(_ image: NSImage?, for source: MediaArtworkSource, token: Int) {

@@ -61,7 +61,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard enforceSingleInstance() else { return }
         Self.shared = self
         print("DynamicIsland: didFinishLaunching")
+        NSLog("DynamicIsland installation: version=%@ path=%@ accessibility=%@",
+              AppInstallation.version, AppInstallation.path,
+              AccessibilityPermission.shared.refresh() ? "granted" : "denied")
         NSApp.setActivationPolicy(.accessory)
+        setupStatusItem()
         _ = updaterController
 
         let island = IslandWindowController()
@@ -89,7 +93,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         detectorWindow = detector
         setupScreenObservers()
-        setupStatusItem()
         setupMenuBarIconManager()
 
         if ProcessInfo.processInfo.environment["DYNAMIC_ISLAND_PREVIEW"] == "1" {
@@ -176,15 +179,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         let statusItemName = "DynamicIsland.MainControl"
         let preferredPositionKey = "NSStatusItem Preferred Position \(statusItemName)"
-        if UserDefaults.standard.object(forKey: preferredPositionKey) == nil {
+        let migrationKey = "DynamicIsland.MainControlVisibilityVersion"
+        if UserDefaults.standard.integer(forKey: migrationKey) < 1 {
             UserDefaults.standard.set(0.0, forKey: preferredPositionKey)
+            UserDefaults.standard.set(true, forKey: "NSStatusItem Visible \(statusItemName)")
+            UserDefaults.standard.set(1, forKey: migrationKey)
         }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.autosaveName = statusItemName
+        item.behavior = []
+        item.isVisible = true
         statusItem = item
         guard let button = item.button else { return }
-        let statusImage = AppResources.url(forResource: "StatusIcon", withExtension: "png")
-            .flatMap(NSImage.init(contentsOf:))
+        let statusImage = NSImage(systemSymbolName: "capsule.inset.filled", accessibilityDescription: "灵动岛")
             ?? NSImage(systemSymbolName: "capsule.fill", accessibilityDescription: "灵动岛")
         statusImage?.isTemplate = true
         statusImage?.size = NSSize(width: 18, height: 18)
@@ -193,11 +200,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.imageScaling = .scaleProportionallyDown
         button.target = self
         button.action = #selector(statusItemClicked)
+        button.toolTip = "灵动岛 \(AppInstallation.version)"
+        button.setAccessibilityLabel("灵动岛菜单")
+        button.setAccessibilityIdentifier("DynamicIsland.MainControl")
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    func restoreMenuBarIcon() {
+        closeMenuBarPopover()
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        UserDefaults.standard.removeObject(forKey: "DynamicIsland.MainControlVisibilityVersion")
+        setupStatusItem()
     }
 
     // MARK: - 菜单栏气泡弹窗
 
     @objc private func statusItemClicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            closeMenuBarPopover()
+            openSettings()
+            return
+        }
         // 防止 popover 被 .transient 关闭后立即重新弹出（闪烁）
         if popoverJustClosed {
             popoverJustClosed = false
@@ -332,6 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   backing: .buffered, defer: false)
             window.title = "灵动岛设置"
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.minSize = NSSize(width: 760, height: 560)
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
@@ -347,6 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+        MediaPlayerStore.shared.setActive(true, consumer: "settings")
     }
 
     // MARK: - 自定义岛屿面板
@@ -413,10 +438,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              window === customizeWindow else { return }
+        guard let window = notification.object as? NSWindow else { return }
+        if window === settingsWindow {
+            MediaPlayerStore.shared.setActive(false, consumer: "settings")
+        }
+        guard window === customizeWindow else { return }
         // 面板关闭：解除实时预览锁定，岛屿回到悬停控制
         islandWindow?.endLivePreview()
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
+        MediaPlayerStore.shared.setActive(window.isVisible && window.occlusionState.contains(.visible), consumer: "settings")
     }
 }
 

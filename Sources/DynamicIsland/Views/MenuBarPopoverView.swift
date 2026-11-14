@@ -4,6 +4,7 @@ import AppKit
 /// 菜单栏气泡弹窗：上栏「已收纳」= 当前被挤出可见菜单栏的图标，下栏「菜单栏」= 可见图标镜像。
 /// 两栏都直接来自实时 AX 判定，应用一退出条目就消失，无需任何本地名单。
 struct MenuBarPopoverView: View {
+    @EnvironmentObject private var settings: SettingsStore
     @ObservedObject private var iconManager = MenuBarIconManager.shared
 
     var isIslandEnabled: Bool
@@ -21,39 +22,48 @@ struct MenuBarPopoverView: View {
     var body: some View {
         let overflowIcons = iconManager.recoverableOverflowIcons()
         VStack(spacing: 0) {
-            header
+            VStack(alignment: .leading, spacing: 4) {
+                Text("灵动岛").font(.system(size: 13, weight: .semibold))
+                Text(AppInstallation.version).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
             Divider()
-            if !iconManager.accessibilityGranted {
-                accessibilityBanner
+            if settings.menuBarStashEnabled {
+                header
+                Divider()
+                if !iconManager.accessibilityGranted {
+                    accessibilityBanner
+                    Divider()
+                }
+                if let message = iconManager.lastMoveMessage {
+                    moveErrorHint(message)
+                    Divider()
+                }
+                if iconManager.isArranging {
+                    arrangeHint
+                    Divider()
+                }
+                grid(iconManager.stashedIcons(), badge: .unstash,
+                     emptyHint: "还没有收纳任何图标，点下方图标右上角的 ＋")
+                if !overflowIcons.isEmpty {
+                    Divider()
+                    overflowHeader
+                    grid(overflowIcons, badge: .unstash,
+                         emptyHint: "没有需要恢复的菜单栏外图标")
+                }
+                Divider()
+                mirrorHeader
+                grid(iconManager.visibleIcons(), badge: .stash,
+                     emptyHint: "没有检测到菜单栏图标")
+                let userHidden = iconManager.userHiddenEntries()
+                if !userHidden.isEmpty {
+                    Divider()
+                    userHiddenHeader
+                    grid(userHidden, badge: .reveal, emptyHint: "", allowsUserHide: false)
+                }
                 Divider()
             }
-            if let message = iconManager.lastMoveMessage {
-                moveErrorHint(message)
-                Divider()
-            }
-            if iconManager.isArranging {
-                arrangeHint
-                Divider()
-            }
-            grid(iconManager.stashedIcons(), badge: .unstash,
-                 emptyHint: "还没有收纳任何图标，点下方图标右上角的 ＋")
-            if !overflowIcons.isEmpty {
-                Divider()
-                overflowHeader
-                grid(overflowIcons, badge: .unstash,
-                     emptyHint: "没有需要恢复的菜单栏外图标")
-            }
-            Divider()
-            mirrorHeader
-            grid(iconManager.visibleIcons(), badge: .stash,
-                 emptyHint: "没有检测到菜单栏图标")
-            let userHidden = iconManager.userHiddenEntries()
-            if !userHidden.isEmpty {
-                Divider()
-                userHiddenHeader
-                grid(userHidden, badge: .reveal, emptyHint: "", allowsUserHide: false)
-            }
-            Divider()
             actionBar
         }
         .frame(width: popoverWidth)

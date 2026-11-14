@@ -28,16 +28,20 @@ final class MusicWindowController: NSWindowController, NSWindowDelegate {
 
     func present() {
         presentation.isVisible = true
-        MediaPlayerStore.shared.refreshNow()
+        MediaPlayerStore.shared.setActive(true, consumer: "music-window")
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func windowWillClose(_ notification: Notification) { presentation.isVisible = false }
+    func windowWillClose(_ notification: Notification) {
+        presentation.isVisible = false
+        MediaPlayerStore.shared.setActive(false, consumer: "music-window")
+    }
 
     @objc private func visibilityChanged() {
         presentation.isVisible = window?.isVisible == true && window?.occlusionState.contains(.visible) == true
+        MediaPlayerStore.shared.setActive(presentation.isVisible, consumer: "music-window")
     }
 }
 

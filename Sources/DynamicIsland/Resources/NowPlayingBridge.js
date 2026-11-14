@@ -13,11 +13,14 @@ function run(arguments) {
             return value && !value.isNil() ? ObjC.unwrap(value) : null;
         }
 
-        function snapshot() {
+        function currentBundle() {
             var path = request.localNowPlayingPlayerPath;
             if (!path || path.isNil() || !path.client) return null;
-            var client = path.client;
-            var bundle = unwrap(client.parentApplicationBundleIdentifier) || unwrap(client.bundleIdentifier);
+            return unwrap(path.client.parentApplicationBundleIdentifier) || unwrap(path.client.bundleIdentifier);
+        }
+
+        function snapshot() {
+            var bundle = currentBundle();
             if (bundle !== expectedBundle) return null;
             var item = request.localNowPlayingItem;
             if (!item || item.isNil() || !item.nowPlayingInfo) return null;
@@ -49,16 +52,18 @@ function run(arguments) {
 
         var before = snapshot();
         if (action === 'state') return JSON.stringify({snapshot: before});
-        if (!before) return JSON.stringify({error: '汽水音乐尚未提供可控制的歌曲，请确认已登录并有可播放的歌曲'});
-        var expectedPlaying = action === 'pause' ? false : action === 'play' ? true : !before.isPlaying;
+        if (currentBundle() !== expectedBundle || (!before && action !== 'resume')) {
+            return JSON.stringify({error: '汽水音乐尚未提供可控制的歌曲，请确认已登录并有可播放的歌曲'});
+        }
+        var expectedPlaying = action === 'pause' ? false : action === 'play' || action === 'resume' ? true : !before.isPlaying;
         var command = action === 'next' ? 4 : action === 'previous' ? 5 : expectedPlaying ? 0 : 1;
-        if ((action === 'play' || action === 'pause') && before.isPlaying === expectedPlaying) {
+        if (before && (action === 'play' || action === 'pause' || action === 'resume') && before.isPlaying === expectedPlaying) {
             return JSON.stringify({snapshot: before, confirmed: true});
         }
         ObjC.bindFunction('MRMediaRemoteSendCommand', ['bool', ['int', 'id']]);
         if (!$.MRMediaRemoteSendCommand(command, $())) return JSON.stringify({error: '播放器未接受操作，请稍后重试'});
         var after;
-        for (var attempt = 0; attempt < 12; attempt++) {
+        for (var attempt = 0; attempt < 20; attempt++) {
             delay(0.1);
             after = snapshot();
             if (!after) continue;
@@ -67,7 +72,7 @@ function run(arguments) {
                 : after.isPlaying === expectedPlaying;
             if (confirmed) return JSON.stringify({snapshot: after, confirmed: true});
         }
-        return JSON.stringify({snapshot: after, error: '播放器尚未确认操作结果，请稍后重试'});
+        return JSON.stringify({snapshot: after, accepted: true, error: '播放器尚未确认操作结果，请稍后重试'});
     } catch (error) {
         return JSON.stringify({error: '媒体服务暂时不可用，请重试'});
     }

@@ -29,6 +29,8 @@ struct PlaybackMetricsChecks {
         expect("不把其他播放器信息显示为汽水音乐", SodaMusicResponse.decode(Data(payload.replacingOccurrences(of: "com.soda.music", with: "com.other.app").utf8))?.snapshot == nil)
         expect("无歌曲返回可用空状态", SodaMusicResponse.decode(Data(#"{"snapshot":null}"#.utf8))?.snapshot == nil)
         expect("无效响应不会成为播放成功", SodaMusicResponse.decode(Data("bad payload".utf8)) == nil)
+        sessionStartupChecks(snapshot: response!.snapshot!)
+        permissionChecks()
 
         let quick = CommandRunner.run(executable: "/usr/bin/printf", arguments: ["ok"], timeout: 1)
         expect("有界子进程保留正确输出", quick.succeeded && String(decoding: quick.data, as: UTF8.self) == "ok")
@@ -65,6 +67,68 @@ struct PlaybackMetricsChecks {
             }
         }
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func permissionChecks() {
+        var granted = false
+        var prompts = 0
+        var settingsOpened = 0
+        let permission = AccessibilityPermission(check: { granted },
+                                                 prompt: { prompts += 1 },
+                                                 showSettings: { settingsOpened += 1 })
+        for _ in 0..<5 { permission.refresh() }
+        expect("读取权限状态不会弹窗或打开系统设置", prompts == 0 && settingsOpened == 0 && !permission.isGranted)
+        permission.request()
+        expect("首次授权只出现系统提示，不叠加设置跳转", prompts == 1 && settingsOpened == 0)
+        permission.request()
+        permission.request()
+        expect("重复授权入口直接打开设置，不重复提示", prompts == 1 && settingsOpened == 2)
+        granted = true
+        expect("授权变更后读取当前进程的实际状态", permission.refresh() && permission.isGranted)
+        granted = false
+        expect("撤销权限后不会继续显示已授权", !permission.refresh() && !permission.isGranted)
+        granted = true
+        let alreadyGranted = AccessibilityPermission(check: { granted },
+                                                     prompt: { prompts += 1 },
+                                                     showSettings: { settingsOpened += 1 })
+        alreadyGranted.request()
+        expect("已有授权不重复请求系统提示", prompts == 1 && settingsOpened == 3)
+    }
+
+    static func sessionStartupChecks(snapshot: SodaMusicSnapshot) {
+        var presses = 0
+        var commands: [String] = []
+        let denied = SodaMusicController(scriptURL: nil, queryOverride: { action in
+            commands.append(action)
+            return SodaMusicResponse()
+        }, isTrusted: { false }, startSession: { presses += 1; return true })
+        expect("未授权时返回明确权限状态，不操作播放器界面", denied.prepareSession()?.contains("辅助功能权限") == true && presses == 0)
+        expect("首播先尝试已有媒体会话", commands == ["state", "resume"])
+
+        let delayed = SodaMusicController(scriptURL: nil, queryOverride: { action in
+            SodaMusicResponse(accepted: action == "resume")
+        }, isTrusted: { true }, startSession: { presses += 1; return true })
+        expect("媒体命令已接受时不再点击一次导致反向暂停", delayed.prepareSession()?.contains("等待歌曲信息") == true && presses == 0)
+
+        var playing = snapshot
+        playing = SodaMusicSnapshot(title: snapshot.title, artist: snapshot.artist, album: snapshot.album,
+                                    isPlaying: true, progress: 0, duration: snapshot.duration,
+                                    bundleIdentifier: snapshot.bundleIdentifier, identifier: snapshot.identifier)
+        let resumed = SodaMusicController(scriptURL: nil, queryOverride: { action in
+            action == "resume" ? SodaMusicResponse(snapshot: playing, confirmed: true) : SodaMusicResponse()
+        }, isTrusted: { false }, startSession: { presses += 1; return true })
+        expect("已有媒体会话可直接播放，无需额外辅助功能权限", resumed.prepareSession() == nil && presses == 0)
+
+        let cold = SodaMusicController(scriptURL: nil, queryOverride: { _ in
+            SodaMusicResponse(snapshot: presses > 0 ? playing : nil)
+        }, isTrusted: { true }, startSession: { presses += 1; return true })
+        expect("首次启动只触发一次播放，并等待真实歌曲确认", cold.prepareSession() == nil && presses == 1)
+
+        let unconfirmed = SodaMusicController(scriptURL: nil, queryOverride: { _ in
+            SodaMusicResponse(snapshot: playing, confirmed: false)
+        })
+        if case .failure = unconfirmed.send(.play) { expect("不能把未确认的播放报告成成功", true) }
+        else { expect("不能把未确认的播放报告成成功", false) }
     }
 
     static func livePlayback(script: URL) {

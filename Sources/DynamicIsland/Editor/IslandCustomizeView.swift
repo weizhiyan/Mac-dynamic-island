@@ -71,7 +71,7 @@ struct IslandCustomizeView: View {
 
     private var tabBar: some View {
         Picker("参数分类", selection: $tab) {
-            ForEach(CustomizeTab.allCases) { item in
+            ForEach(CustomizeTab.allCases.filter { CompactMediaView.isPlaybackEffectEnabled || $0 != .compact }) { item in
                 Label(item.title, systemImage: item.symbol).tag(item)
             }
         }

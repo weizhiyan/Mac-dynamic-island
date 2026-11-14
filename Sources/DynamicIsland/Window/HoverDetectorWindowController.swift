@@ -12,6 +12,9 @@ final class HoverDetectorWindowController: NSWindowController {
     private var leaveWorkItem: DispatchWorkItem?
     private var previewWindow: NSWindow?
     private var lastScreenFrame: CGRect?
+    private var mouseMonitors: [Any] = []
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var lastMouseCheck: TimeInterval = 0
 
     init(islandFrameProvider: @escaping () -> NSRect?, onEnter: @escaping () -> Void, onLeave: @escaping () -> Void, onMouseMove: ((CGFloat) -> Void)? = nil, onScreenChanged: (() -> Void)? = nil) {
         self.islandFrameProvider = islandFrameProvider
@@ -30,6 +33,13 @@ final class HoverDetectorWindowController: NSWindowController {
         window.setFrame(NotchDetector.current().frame, display: true)
         super.init(window: window)
         startPolling()
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.stopPolling()
+        })
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.startPolling()
+        })
     }
 
     @available(*, unavailable)
@@ -37,6 +47,8 @@ final class HoverDetectorWindowController: NSWindowController {
 
     deinit {
         pollTimer?.invalidate()
+        mouseMonitors.forEach { NSEvent.removeMonitor($0) }
+        workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
     }
 
     func refreshScreenGeometry() {
@@ -84,14 +96,39 @@ final class HoverDetectorWindowController: NSWindowController {
     }
 
     private func startPolling() {
-        pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        stopPolling()
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in self?.handleMouseMoved() }) {
+            mouseMonitors.append(monitor)
+        }
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            self?.handleMouseMoved()
+            return event
+        }) { mouseMonitors.append(monitor) }
+        // Mouse events keep hover immediate; a low-rate fallback handles missed events and geometry changes.
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.handleMouseMoved()
         }
+        pollTimer?.tolerance = 0.05
         RunLoop.main.add(pollTimer!, forMode: .common)
     }
 
+    private func stopPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        mouseMonitors.forEach { NSEvent.removeMonitor($0) }
+        mouseMonitors.removeAll()
+        enterWorkItem?.cancel()
+        enterWorkItem = nil
+        leaveWorkItem?.cancel()
+        leaveWorkItem = nil
+        if isInside { isInside = false; onLeave() }
+    }
+
     private func handleMouseMoved() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastMouseCheck >= 1.0 / 60.0 else { return }
+        lastMouseCheck = now
         let location = NSEvent.mouseLocation
 
         let notch = NotchDetector.current()

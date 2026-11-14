@@ -135,8 +135,8 @@ struct MusicMiniSummary: View {
             .accessibilityLabel("查看歌曲与播放控制")
 
             MediaControlButton(
-                symbol: mediaPlayer.playbackState == .playing ? "pause.fill" : "play.fill",
-                help: mediaPlayer.playbackState == .playing ? "暂停" : "播放",
+                symbol: mediaPlayer.playbackControlSymbol,
+                help: mediaPlayer.playbackControlTitle,
                 showsProgress: mediaPlayer.isBusy,
                 action: mediaPlayer.togglePlayPause
             )
@@ -247,8 +247,8 @@ struct MetricsMiniSummary: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            MiniMetric(title: "CPU", value: metrics.cpu?.usage) { MetricsWindowController.shared.present(.cpu) }
-            MiniMetric(title: "内存", value: metrics.memory?.usage) { MetricsWindowController.shared.present(.memory) }
+            MiniMetric(title: "CPU", value: metrics.cpu?.usage, action: AppInstallation.openActivityMonitor)
+            MiniMetric(title: "内存", value: metrics.memory?.usage, action: AppInstallation.openActivityMonitor)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
@@ -279,8 +279,8 @@ struct MiniMetric: View {
         .buttonStyle(.plain)
         .background(isHovered ? Color.white.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7))
         .onHover { isHovered = $0 }
-        .help("查看\(title)详情")
-        .accessibilityLabel("查看\(title)详情")
+        .help("打开活动监视器")
+        .accessibilityLabel("\(title)，打开活动监视器")
         .accessibilityValue(value.map { "\(Int($0 * 100))%" } ?? "正在采样")
     }
 }

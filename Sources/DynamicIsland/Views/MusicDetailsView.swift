@@ -46,12 +46,14 @@ struct MusicDetailsView: View {
                 Button(action: media.togglePlayPause) {
                     HStack(spacing: 8) {
                         if media.isBusy { ProgressView().controlSize(.small) }
-                        else { Image(systemName: media.playbackState == .playing ? "pause.fill" : "play.fill") }
-                        Text(media.isBusy ? "正在连接" : media.playbackState == .playing ? "暂停" : "播放")
+                        else { Image(systemName: media.playbackControlSymbol) }
+                        Text(media.isBusy ? "正在连接" : media.playbackControlTitle)
                     }
-                    .frame(width: 104, height: 32)
+                    .frame(width: 128, height: 32)
                 }
                 .buttonStyle(.borderedProminent)
+                .help(media.playbackControlTitle)
+                .accessibilityLabel(media.playbackControlTitle)
                 .disabled(media.isBusy)
                 .keyboardShortcut(.space, modifiers: [])
                 Button(action: media.nextTrack) {

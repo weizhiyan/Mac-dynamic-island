@@ -31,6 +31,7 @@ struct SodaMusicResponse: Decodable {
     var snapshot: SodaMusicSnapshot?
     var error: String?
     var confirmed: Bool?
+    var accepted: Bool?
 
     static func decode(_ data: Data) -> SodaMusicResponse? {
         guard var response = try? JSONDecoder().decode(Self.self, from: data) else { return nil }
@@ -45,8 +46,18 @@ struct SodaMusicResponse: Decodable {
 final class SodaMusicController {
     private let bundleIdentifier = "com.soda.music"
     private let scriptURL: URL?
+    private let queryOverride: ((String) -> SodaMusicResponse)?
+    private let isTrusted: () -> Bool
+    private let startSession: () -> Bool
 
-    init(scriptURL: URL?) { self.scriptURL = scriptURL }
+    init(scriptURL: URL?, queryOverride: ((String) -> SodaMusicResponse)? = nil,
+         isTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
+         startSession: @escaping () -> Bool = { SodaSessionStarter.pressPlay() }) {
+        self.scriptURL = scriptURL
+        self.queryOverride = queryOverride
+        self.isTrusted = isTrusted
+        self.startSession = startSession
+    }
 
     var isRunning: Bool {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).contains { !$0.isTerminated }
@@ -66,7 +77,7 @@ final class SodaMusicController {
     func launch() -> Bool {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else { return false }
         let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
+        configuration.activates = false
         let launched = DispatchSemaphore(value: 0)
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in launched.signal() }
         guard launched.wait(timeout: .now() + 4) == .success else { return false }
@@ -75,21 +86,27 @@ final class SodaMusicController {
 
     func prepareSession() -> String? {
         if read().snapshot != nil { return nil }
-        guard AXIsProcessTrusted() else {
-            SodaSessionStarter.requestPermission()
-            return "首次启动汽水音乐播放需要辅助功能权限，请授权后重试。"
+        // A player can retain its media command handler before publishing track metadata.
+        let resumed = query(action: "resume")
+        if resumed.confirmed == true, resumed.snapshot?.isPlaying == true { return nil }
+        if resumed.accepted == true { return "已请求汽水音乐播放，正在等待歌曲信息。" }
+        guard isTrusted() else {
+            return "当前版本的辅助功能权限尚未生效。可前往授权后继续播放，或先在汽水音乐中播放一首歌曲。"
         }
-        let deadline = Date().addingTimeInterval(7)
+        let deadline = Date().addingTimeInterval(5)
         var didPress = false
         repeat {
             if read().snapshot != nil { return nil }
-            if !didPress { didPress = SodaSessionStarter.pressPlay() }
+            if !didPress { didPress = startSession() }
             Thread.sleep(forTimeInterval: 0.25)
         } while Date() < deadline
-        return "汽水音乐尚未提供可播放的歌曲，请检查登录、网络或歌曲播放权限。"
+        return didPress
+            ? "已请求汽水音乐播放，但尚未收到歌曲信息。请检查播放器登录、网络或歌曲是否可播放。"
+            : "未找到汽水音乐的播放按钮。请先在播放器中选择一首歌曲，之后可在灵动岛直接播放或暂停。"
     }
 
     private func query(action: String) -> SodaMusicResponse {
+        if let queryOverride { return queryOverride(action) }
         guard let scriptURL else { return SodaMusicResponse(error: "播放器组件缺失，请重新安装灵动岛") }
         let result = CommandRunner.run(
             executable: "/usr/bin/osascript",

@@ -109,15 +109,9 @@ final class MenuBarIconManager: ObservableObject {
 
     // MARK: - 权限
 
-    /// 弹出系统授权框并跳转系统设置
+    /// 所有入口共用一次系统提示，后续直接前往设置。
     func requestAccessibilityPermission() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        if let url = URL(string:
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        ) {
-            NSWorkspace.shared.open(url)
-        }
+        AccessibilityPermission.shared.request()
     }
 
     // MARK: - 启动 / 停止

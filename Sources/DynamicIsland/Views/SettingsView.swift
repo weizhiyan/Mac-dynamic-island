@@ -1,34 +1,42 @@
 import SwiftUI
 import AppKit
+import ApplicationServices
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var appStore: AppStore
-    @State private var selectedPane: SettingsPane? = .overview
+    @State private var selectedPane: SettingsPane = .overview
     @State private var draggedApp: AppItem?
     @State private var confirmsReset = false
+    @ObservedObject private var accessibility = AccessibilityPermission.shared
     @ObservedObject private var mediaPlayer = MediaPlayerStore.shared
+
+    init(initialPane: SettingsPane = .overview, accessibility: AccessibilityPermission = .shared) {
+        _selectedPane = State(initialValue: initialPane)
+        _accessibility = ObservedObject(wrappedValue: accessibility)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
-                .frame(width: 224)
-
+            sidebar.frame(width: 184)
             Divider()
-
             ScrollView {
                 paneContent
                     .frame(maxWidth: 680, alignment: .leading)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 32)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 48)
+                    .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(minWidth: 760, minHeight: 560)
         .ignoresSafeArea(.container, edges: .top)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            accessibility.refresh()
+        }
+        .onAppear { accessibility.refresh() }
         .alert("恢复所有参数？", isPresented: $confirmsReset) {
             Button("取消", role: .cancel) {}
             Button("恢复默认", role: .destructive) { settings.restoreDefaults() }
@@ -38,161 +46,176 @@ struct SettingsView: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 20) {
             Text("灵动岛设置")
                 .font(.system(size: 13, weight: .semibold))
-                .padding(.leading, 50)
-                .padding(.top, 30)
-
+                .padding(.leading, 12)
+                .padding(.top, 48)
             VStack(spacing: 4) {
                 ForEach(SettingsPane.allCases) { pane in
-                    Button {
-                        selectedPane = pane
-                    } label: {
+                    Button { selectedPane = pane } label: {
                         Label(pane.title, systemImage: pane.symbol)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(SettingsSidebarButtonStyle(isSelected: selectedPane == pane))
                 }
             }
-            .padding(.horizontal, 8)
-
             Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("灵动岛 \(AppInstallation.version)")
+                Label(AppInstallation.isInstalled ? "已安装，正在运行" : "正在运行开发副本", systemImage: "checkmark.circle")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .padding(12)
         }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.9))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.38))
-        }
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
-        .padding(.leading, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
     }
 
     @ViewBuilder
     private var paneContent: some View {
-        switch selectedPane ?? .overview {
-        case .overview:
-            overviewPane
-        case .appearance:
-            appearancePane
-        case .animation:
-            animationPane
-        case .trigger:
-            triggerPane
+        switch selectedPane {
+        case .overview: overviewPane
+        case .music: musicPane
+        case .apps: SettingsPage(title: "快捷应用") { appManagementSection }
+        case .appearance: appearancePane
+        case .animation: animationPane
+        case .trigger: triggerPane
+        case .about: aboutPane
         }
     }
 
     private var overviewPane: some View {
-        SettingsPage(title: "基础设置") {
-            appManagementSection
-
-            HStack(spacing: 12) {
-                MetricTile(title: "快捷应用", value: "\(appStore.apps.count)", symbol: "app")
-                MetricTile(title: "展开尺寸", value: "\(Int(settings.expandedWidth)) x \(Int(settings.expandedHeight))", symbol: "arrow.up.left.and.arrow.down.right")
-                MetricTile(title: "触发区", value: "\(Int(settings.hoverZoneWidth)) x \(Int(settings.hoverZoneHeight))", symbol: "cursorarrow")
-            }
-
-            SettingsGroup("自定义布局") {
-                HStack {
-                    Label("组件化自定义面板", systemImage: "slider.horizontal.3")
-                    Spacer()
-                    Button("打开面板") {
-                        AppDelegate.shared?.openCustomizePanel()
-                    }
-                }
-                Text("把音乐摘要、指标、时钟、电池等组件拖进灵动岛的不同槽位；尺寸、收起带、动画按类型分成 Tab，边调边看屏幕上方真实效果。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsGroup("系统") {
+        SettingsPage(title: "通用") {
+            SettingsGroup("启动") {
                 Toggle(isOn: $settings.launchAtLoginEnabled) {
                     Label("开机自启动", systemImage: "power")
                 }
+            }
+            SettingsGroup("菜单栏") {
                 Toggle(isOn: $settings.menuBarStashEnabled) {
                     Label("菜单栏图标收纳", systemImage: "tray.and.arrow.down")
                 }
-                Text("关闭后不再安装收纳分隔符，已收纳的菜单栏图标会恢复显示；重新开启后可继续使用收纳功能。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Label("灵动岛菜单栏入口", systemImage: "capsule.inset.filled")
+                    Spacer()
+                    Button("恢复图标") { AppDelegate.shared?.restoreMenuBarIcon() }
+                }
             }
+            SettingsGroup("灵动岛") {
+                HStack {
+                    Label("组件与布局", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Button("自定义") { AppDelegate.shared?.openCustomizePanel() }
+                }
+                HStack {
+                    Label("系统性能", systemImage: "waveform.path.ecg")
+                    Spacer()
+                    Button("活动监视器", action: AppInstallation.openActivityMonitor)
+                }
+            }
+        }
+    }
 
-            SettingsGroup("音乐播放") {
+    private var musicPane: some View {
+        SettingsPage(title: "音乐播放") {
+            SettingsGroup("播放器") {
                 HStack {
                     Label("绑定播放器", systemImage: "music.note")
                     Spacer()
                     Picker("绑定播放器", selection: $settings.mediaPlayerBundleID) {
                         Text("不显示").tag(String?.none)
-                        ForEach(MediaPlayerOption.allCases.filter(\.isInstalled)) { option in
-                            Text(option.title).tag(Optional(option.rawValue))
+                        ForEach(MediaPlayerOption.allCases) { option in
+                            Text(option.title + (option.isInstalled ? "" : "（未安装）"))
+                                .tag(Optional(option.rawValue))
+                                .disabled(!option.isInstalled)
                         }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                    .frame(maxWidth: 200)
                 }
-                Text("点击播放可自动启动绑定的播放器；点击歌名可查看完整信息与切歌。Spotify 和音乐需要自动化授权；汽水音乐首次启动播放可能需要辅助功能授权，之后通过系统媒体服务控制。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Label(mediaPlayer.isBusy ? "正在连接播放器…" : mediaPlayer.track?.title ?? mediaPlayer.primaryStatusText,
+            }
+            SettingsGroup("正在播放") {
+                HStack(spacing: 12) {
+                    Label(mediaPlayer.isBusy ? "正在连接播放器…" : mediaPlayer.primaryStatusText,
                           systemImage: mediaPlayer.lastError == nil ? "music.note" : "exclamationmark.triangle")
-                        .font(.callout).lineLimit(1)
+                        .font(.callout).lineLimit(2)
                     Spacer()
-                    Button("播放控制") { MusicWindowController.shared.present() }
+                    Button(action: mediaPlayer.togglePlayPause) {
+                        Image(systemName: mediaPlayer.playbackControlSymbol)
+                            .frame(width: 24, height: 24)
+                    }
+                    .disabled(mediaPlayer.isBusy || settings.mediaPlayerBundleID == nil)
+                    .help(mediaPlayer.playbackControlTitle)
+                    .accessibilityLabel(mediaPlayer.playbackControlTitle)
+                    Button("歌曲详情") { MusicWindowController.shared.present() }
                 }
                 if let error = mediaPlayer.lastError {
-                    Text(error).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    Text(error).font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Button("重试连接", action: mediaPlayer.retryConnection).disabled(mediaPlayer.isBusy)
                         if mediaPlayer.permissionRequired { Button("前往授权", action: mediaPlayer.openPermissionSettings) }
                     }
                 }
             }
-
-            SettingsGroup("更新") {
-                HStack {
-                    Label("当前版本 \(appVersion)", systemImage: "arrow.triangle.2.circlepath")
-                    Spacer()
-                    Button("检查更新") {
-                        AppDelegate.shared?.checkForUpdates()
+            if mediaPlayer.selectedOption == .soda {
+                SettingsGroup("辅助功能权限") {
+                    HStack {
+                        Label(accessibility.isGranted ? "已授权" : "当前应用未获授权",
+                              systemImage: accessibility.isGranted ? "checkmark.circle" : "lock")
+                        Spacer()
+                        if !accessibility.isGranted {
+                            Button("前往授权", action: mediaPlayer.openPermissionSettings)
+                        }
                     }
-                }
-            }
-
-            SettingsGroup("维护") {
-                HStack {
-                    Label("恢复所有参数到默认值", systemImage: "arrow.counterclockwise")
-                    Spacer()
-                    Button("恢复默认") {
-                        confirmsReset = true
-                    }
-                }
-                HStack {
-                    Label("恢复默认快捷应用", systemImage: "square.grid.2x2")
-                    Spacer()
-                    Button("恢复应用") {
-                        appStore.restoreDefaultApps()
+                    if !accessibility.isGranted {
+                        Text("尚无歌曲时，自动开始播放需要辅助功能权限。若已开启仍显示未授权，请移除旧条目，再添加下方的当前应用。")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button("定位当前应用", action: AppInstallation.revealInFinder)
+                            Button("重新检测") { mediaPlayer.retryConnection() }
+                        }
+                        Text("\(AppInstallation.version) · \(AppInstallation.path)")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
         }
     }
 
-    private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-
-        if let version, let build, !build.isEmpty {
-            return "\(version) (\(build))"
+    private var aboutPane: some View {
+        SettingsPage(title: "关于与更新") {
+            SettingsGroup("当前运行版本") {
+                HStack {
+                    Label("灵动岛 \(AppInstallation.version)", systemImage: "capsule.inset.filled")
+                    Spacer()
+                    Button("检查更新") { AppDelegate.shared?.checkForUpdates() }
+                }
+                HStack {
+                    Text(AppInstallation.isInstalled ? "已安装到应用程序" : "当前运行的是开发副本")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("在访达中显示", action: AppInstallation.revealInFinder)
+                }
+                Text(AppInstallation.path).font(.caption).foregroundStyle(.secondary)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+            SettingsGroup("恢复默认") {
+                HStack {
+                    Text("布局、播放器与动画参数")
+                    Spacer()
+                    Button("恢复参数") { confirmsReset = true }
+                }
+                HStack {
+                    Text("快捷应用")
+                    Spacer()
+                    Button("恢复应用") { appStore.restoreDefaultApps() }
+                }
+            }
         }
-
-        return version ?? "未知"
     }
 
     private var appManagementSection: some View {
@@ -263,24 +286,6 @@ struct SettingsView: View {
                 NumericSetting(title: "收起态", value: $settings.compactCornerRadius.doubleValue, range: 0...40, suffix: "pt")
                 NumericSetting(title: "展开态", value: $settings.expandedCornerRadius.doubleValue, range: 0...40, suffix: "pt")
                 Text("收起态圆角只在刘海带露出时可见；展开态圆角同时作用于自定义面板的预览。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsGroup("收起音乐层") {
-                Toggle(isOn: $settings.compactBandAutoSize) {
-                    Label("自动匹配刘海尺寸", systemImage: "wand.and.rays")
-                }
-
-                if !settings.compactBandAutoSize {
-                    NumericSetting(title: "总宽度", value: $settings.compactBandWidth.doubleValue, range: 80...900, suffix: "pt")
-                    NumericSetting(title: "总高度", value: $settings.compactBandHeight.doubleValue, range: 20...80, suffix: "pt")
-                }
-
-                NumericSetting(title: "顶部过渡圆角", value: $settings.compactBandTopRadius.doubleValue, range: 0...40, suffix: "pt")
-                NumericSetting(title: "底部圆角", value: $settings.compactBandBottomRadius.doubleValue, range: 0...40, suffix: "pt")
-                NumericSetting(title: "垂直偏移", value: $settings.compactBandYOffset.doubleValue, range: -20...20, suffix: "pt")
-                Text("圆角填 0 使用自动值；手动尺寸只在关闭自动匹配后生效。应用网格的图标大小、列数、间距请在「自定义布局」面板里调。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -375,17 +380,23 @@ struct SettingsView: View {
 
 }
 
-private enum SettingsPane: String, CaseIterable, Identifiable {
+enum SettingsPane: String, CaseIterable, Identifiable {
     case overview
+    case music
+    case apps
     case appearance
     case animation
     case trigger
+    case about
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .overview: "基础设置"
+        case .overview: "通用"
+        case .music: "音乐播放"
+        case .apps: "快捷应用"
+        case .about: "关于与更新"
         case .appearance: "外观布局"
         case .animation: "动画"
         case .trigger: "触发方式"
@@ -395,6 +406,9 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .overview: "gearshape"
+        case .music: "music.note"
+        case .apps: "square.grid.2x2"
+        case .about: "info.circle"
         case .appearance: "paintbrush"
         case .animation: "timer"
         case .trigger: "cursorarrow"
@@ -409,7 +423,7 @@ private struct SettingsPage<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text(title)
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold))
             content
         }
     }
@@ -423,7 +437,7 @@ private struct SettingsSidebarButtonStyle: ButtonStyle {
             .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
             .foregroundStyle(isSelected ? .primary : .secondary)
             .padding(.horizontal, 10)
-            .frame(height: 32)
+            .frame(height: 36)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.16) : .clear)
@@ -447,45 +461,11 @@ private struct SettingsGroup<Content: View>: View {
             Text(title)
                 .font(.headline)
 
-            VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 content
             }
-            .padding(14)
-            .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(.separator.opacity(0.35))
-            }
-        }
-    }
-}
-
-private struct MetricTile: View {
-    let title: String
-    let value: String
-    let symbol: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 19, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(.separator.opacity(0.35))
+            .padding(.vertical, 12)
+            Divider()
         }
     }
 }
@@ -626,10 +606,11 @@ private struct BezierControlPoints {
     let y2: CGFloat
 
     init?(_ value: String) {
-        let values = value
-            .split(separator: ",", omittingEmptySubsequences: false)
+        let parts = value.split(separator: ",", omittingEmptySubsequences: false)
+        let values = parts
             .compactMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        guard values.count == 4, (0...1).contains(values[0]), (0...1).contains(values[2]) else { return nil }
+        guard parts.count == 4, values.count == 4, values.allSatisfy(\.isFinite),
+              (0...1).contains(values[0]), (0...1).contains(values[2]) else { return nil }
         x1 = CGFloat(values[0])
         y1 = CGFloat(values[1])
         x2 = CGFloat(values[2])
@@ -649,13 +630,15 @@ private struct NumericSetting: View {
                 .frame(width: 118, alignment: .leading)
 
             Slider(value: $value, in: range, step: 1)
+                .accessibilityLabel(title)
 
             TextField("", value: $value, format: .number.precision(.fractionLength(0)))
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 64)
+                .accessibilityLabel("\(title)，\(suffix)")
                 .onChange(of: value) { _, newValue in
-                    value = min(max(newValue, range.lowerBound), range.upperBound)
+                    value = newValue.isFinite ? min(max(newValue, range.lowerBound), range.upperBound) : range.lowerBound
                 }
 
             Text(suffix)
@@ -756,8 +739,8 @@ private struct AppTile: View {
 
     @ViewBuilder
     private var appIcon: some View {
-        if let path = app.path {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+        if app.path != nil {
+            Image(nsImage: IconLoader.icon(for: app))
                 .resizable()
                 .scaledToFit()
         } else {

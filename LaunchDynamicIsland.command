@@ -5,8 +5,8 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT_DIR/Build"
 APP_PRODUCT="DynamicIsland"
 APP_DISPLAY_NAME="灵动岛"
-APP_VERSION="${APP_VERSION:-1.0.4}"
-APP_BUILD="${APP_BUILD:-18}"
+APP_VERSION="${APP_VERSION:-1.0.5}"
+APP_BUILD="${APP_BUILD:-20}"
 APPCAST_URL="${APPCAST_URL:-https://raw.githubusercontent.com/weizhiyan/Mac-dynamic-island/main/appcast.xml}"
 SPARKLE_PUBLIC_KEY="28WnLNAVZfPjPPkIQIZlni3sSjuwE8kvn3nPAT2X/W8="
 APP_BUNDLE="$BUILD_DIR/$APP_DISPLAY_NAME.app"
@@ -124,8 +124,8 @@ find "$APP_BUNDLE" -xattrname 'com.apple.fileprovider.fpfs#P' -exec xattr -d 'co
 rm -rf "$SIGNING_ROOT"
 mkdir -p "$SIGNING_ROOT"
 ditto --norsrc --noextattr --noacl --noqtn "$APP_BUNDLE" "$SIGNED_APP_BUNDLE"
-# 优先用自签名证书 LingDongDaoDev（签名身份跨构建稳定，TCC 权限授权一次永久有效）；
-# 没有则退回 adhoc 签名（每次重建后需在系统设置里重新授权）
+# 优先使用已有稳定签名身份，降低更新后权限失效的可能。
+# adhoc 签名每次重建都会改变身份，TCC 授权可能需要重新添加当前应用。
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 if [[ -z "$SIGN_IDENTITY" ]] && security find-identity -v -p codesigning 2>/dev/null | grep -q "LingDongDaoDev"; then
   SIGN_IDENTITY="LingDongDaoDev"

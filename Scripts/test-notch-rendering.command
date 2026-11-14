@@ -291,7 +291,7 @@ check_present "支持手动隐藏应用" "$SRC/Managers/MenuBarIconManager.swift
 check_present "被抬离菜单栏的图标两栏都不显示" "$SRC/Managers/MenuBarIconManager.swift" "isLiftedOffMenuBar"
 check_present "封面地址只接受本地文件或 http(s) 链接" "$SRC/Managers/MediaPlayerStore.swift" "case \"http\", \"https\""
 check_present "封面下载有体积上限" "$SRC/Managers/MediaPlayerStore.swift" "data.count <= Self.artworkByteLimit"
-check_present "封面只在内存缓存，不落盘" "$SRC/Managers/MediaPlayerStore.swift" "diskCapacity: 0"
+check_present "封面不使用磁盘缓存" "$SRC/Managers/MediaPlayerStore.swift" "urlCache = nil|diskCapacity: 0"
 check_present "绑定播放器支持汽水音乐" "$SRC/Managers/MediaPlayerStore.swift" 'case soda = "com.soda.music"'
 check_present "汽水音乐使用独立媒体后端" "$SRC/Managers/MediaPlayerStore.swift" "SodaMusicController"
 check_present "汽水音乐读取当前系统媒体元数据" "$SRC/Resources/NowPlayingBridge.js" "MRNowPlayingRequest"
