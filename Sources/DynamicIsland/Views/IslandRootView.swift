@@ -99,40 +99,70 @@ struct IslandTopControls: View {
 struct MusicMiniSummary: View {
     @EnvironmentObject private var mediaPlayer: MediaPlayerStore
     @EnvironmentObject private var viewModel: IslandViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Button { MusicWindowController.shared.present() } label: {
-                HStack(spacing: 6) {
-                    MiniAvatar(image: mediaPlayer.avatarImage)
-                    Text(summaryLine)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(mediaPlayer.track == nil ? AnyShapeStyle(.white.opacity(0.5)) : AnyShapeStyle(.white.opacity(0.88)))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .overlay(alignment: .bottomLeading) {
-                            if let progress {
-                                PlaybackProgressLine(progress: progress)
-                                    .offset(y: 3)
+            ZStack {
+                Button { MusicWindowController.shared.present() } label: {
+                    HStack(spacing: 6) {
+                        MiniAvatar(image: mediaPlayer.avatarImage)
+                        Text(summaryLine)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(mediaPlayer.track == nil ? AnyShapeStyle(.white.opacity(0.5)) : AnyShapeStyle(.white.opacity(0.88)))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .overlay(alignment: .bottomLeading) {
+                                if let progress {
+                                    PlaybackProgressLine(progress: progress)
+                                        .offset(y: 3)
+                                }
                             }
+                        if mediaPlayer.track != nil {
+                            PlaybackWaveformBadge(
+                                state: mediaPlayer.playbackState,
+                                isActive: viewModel.isExpanded
+                            )
                         }
-                    if mediaPlayer.track != nil {
-                        PlaybackWaveformBadge(
-                            state: mediaPlayer.playbackState,
-                            isActive: viewModel.isExpanded
+                        if mediaPlayer.lastError != nil {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 11)).foregroundStyle(.orange)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 27, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(mediaPlayer.lastError ?? "查看歌曲与播放控制")
+                .accessibilityLabel("查看歌曲与播放控制")
+
+                if mediaPlayer.track != nil {
+                    HStack(spacing: 0) {
+                        TrackSkipButton(
+                            symbol: "backward.end.fill",
+                            help: "上一首",
+                            enabled: !mediaPlayer.isBusy,
+                            action: mediaPlayer.previousTrack
+                        )
+                        Spacer(minLength: 0)
+                        TrackSkipButton(
+                            symbol: "forward.end.fill",
+                            help: "下一首",
+                            enabled: !mediaPlayer.isBusy,
+                            action: mediaPlayer.nextTrack
                         )
                     }
-                    if mediaPlayer.lastError != nil {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 11)).foregroundStyle(.orange)
-                    }
+                    .opacity(showsTrackSkipControls ? 1 : 0)
+                    .allowsHitTesting(showsTrackSkipControls)
+                    .accessibilityHidden(!showsTrackSkipControls)
+                    .animation(
+                        reduceMotion ? nil : .easeOut(duration: 0.14),
+                        value: showsTrackSkipControls
+                    )
                 }
-                .frame(minHeight: 27, alignment: .leading)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .help(mediaPlayer.lastError ?? "查看歌曲与播放控制")
-            .accessibilityLabel("查看歌曲与播放控制")
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             MediaControlButton(
                 symbol: mediaPlayer.playbackControlSymbol,
@@ -144,7 +174,19 @@ struct MusicMiniSummary: View {
             .layoutPriority(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .onChange(of: mediaPlayer.track == nil) { _, hasNoTrack in
+            if hasNoTrack { isHovered = false }
+        }
+        .onChange(of: viewModel.isExpanded) { _, isExpanded in
+            if !isExpanded { isHovered = false }
+        }
         .help(mediaPlayer.lastError ?? mediaPlayer.track?.title ?? "播放")
+    }
+
+    private var showsTrackSkipControls: Bool {
+        isHovered && mediaPlayer.track != nil
     }
 
     private var summaryLine: String {
@@ -159,6 +201,37 @@ struct MusicMiniSummary: View {
                 ? max(0, Date().timeIntervalSince(mediaPlayer.sampledAt))
                 : 0)
         return min(max(elapsed / mediaPlayer.duration, 0), 1)
+    }
+}
+
+private struct TrackSkipButton: View {
+    let symbol: String
+    let help: String
+    let enabled: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white.opacity(enabled ? (isHovered ? 1 : 0.86) : 0.34))
+                .frame(width: 22, height: 24)
+                .background(
+                    Color.black.opacity(enabled && isHovered ? 0.92 : 0.74),
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(.white.opacity(enabled && isHovered ? 0.18 : 0.1), lineWidth: 0.5)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .onHover { isHovered = $0 }
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
